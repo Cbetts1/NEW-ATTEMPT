@@ -38,12 +38,12 @@ ASFLAGS  := -f bin
 
 ifeq ($(CROSS),1)
 CFLAGS   := -std=c99 -ffreestanding -O2 -Wall -Wextra \
-            -fno-stack-protector -fno-builtin \
+            -fno-stack-protector -fno-builtin -fno-pic -fno-pie \
             -I kernel -I env -I modules -I adapters
 LDFLAGS  := -T kernel/kernel.ld -nostdlib
 else
 CFLAGS   := -std=c99 -m32 -ffreestanding -O2 -Wall -Wextra \
-            -fno-stack-protector -fno-builtin \
+            -fno-stack-protector -fno-builtin -fno-pic -fno-pie \
             -I kernel -I env -I modules -I adapters
 LDFLAGS  := -T kernel/kernel.ld -melf_i386 -nostdlib
 endif
@@ -66,7 +66,9 @@ KERNEL_SRCS := \
     kernel/plugin.c    \
     kernel/mirror.c    \
     kernel/scheduler.c \
-    kernel/menu.c
+    kernel/menu.c      \
+    kernel/kstring.c   \
+    kernel/keyboard.c
 
 ENV_SRCS := \
     env/env.c  \
@@ -74,10 +76,12 @@ ENV_SRCS := \
 
 MODULE_SRCS := \
     modules/loader.c   \
-    modules/mod_hello.c
+    modules/mod_hello.c \
+    modules/aura_core.c
 
 ADAPTER_SRCS := \
-    adapters/adapter_serial.c
+    adapters/adapter_serial.c \
+    adapters/aura_net.c
 
 ALL_C_SRCS := $(KERNEL_SRCS) $(ENV_SRCS) $(MODULE_SRCS) $(ADAPTER_SRCS)
 

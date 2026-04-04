@@ -31,4 +31,9 @@ typedef struct {
 /* Register an adapter as a plugin */
 aura_status_t adapter_register(adapter_t *adp);
 
+/* Serial adapter public API */
+void adapter_serial_register(void);
+void serial_poll(void);
+void adapter_net_register(void);
+
 #endif /* ADAPTER_H */

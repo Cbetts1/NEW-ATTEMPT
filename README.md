@@ -66,10 +66,12 @@ Adapters
 |------|-------------|
 | `bootloader/boot.asm` | Stage 1 MBR bootloader (NASM) |
 | `kernel/` | Kernel C sources + headers |
-| `kernel/kernel.ld` | Linker script (base `0x10000`) |
+| `kernel/kstring.c` | Shared string utilities (`strncpy_k`, `strncmp_k`, `strlen_k`) |
+| `kernel/keyboard.c` | PS/2 keyboard driver (polling, scancode→ASCII) |
+| `kernel/kernel.ld` | Linker script (ELF32, base `0x10000`) |
 | `env/` | Environment registry + virtual FS |
-| `modules/` | Module loader + built-in modules |
-| `adapters/` | Hardware/virtual device adapters |
+| `modules/` | Module loader + built-in modules (`mod_hello`, `aura_core`) |
+| `adapters/` | Hardware/virtual device adapters (`serial`, `net stub`) |
 | `build/` | Compiled objects (auto-created) |
 | `image/AIOS.img` | Final bootable disk image |
 | `docs/` | Architecture, build, and QEMU guides |

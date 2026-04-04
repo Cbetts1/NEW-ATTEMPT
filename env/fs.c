@@ -3,29 +3,10 @@
  * =============================================================================*/
 
 #include "fs.h"
+#include "../kernel/kstring.h"
+#include "../kernel/memory.h"
 
 static fs_node_t fs_table[FS_MAX_FILES];
-
-static int strncmp_k(const char *a, const char *b, int n) {
-    while (n-- > 0) {
-        if (*a != *b) return (int)(unsigned char)*a - (int)(unsigned char)*b;
-        if (*a == '\0') return 0;
-        a++; b++;
-    }
-    return 0;
-}
-
-static void strncpy_k(char *dst, const char *src, int n) {
-    int i = 0;
-    while (i < n - 1 && src[i]) { dst[i] = src[i]; i++; }
-    dst[i] = '\0';
-}
-
-static void memcpy_k(void *dst, const void *src, uint32_t len) {
-    uint8_t *d = (uint8_t *)dst;
-    const uint8_t *s = (const uint8_t *)src;
-    while (len--) *d++ = *s++;
-}
 
 /* -------------------------------------------------------------------------- */
 
@@ -57,7 +38,7 @@ int fs_write(const char *name, const uint8_t *data, uint32_t len) {
     fs_node_t *node = fs_find(name);
     if (!node || node->type != FS_TYPE_FILE) return -1;
     if (len > FS_DATA_SIZE) len = FS_DATA_SIZE;
-    memcpy_k(node->data, data, len);
+    memcpy_k(node->data, data, (size_t)len);
     node->size = len;
     return (int)len;
 }
@@ -66,7 +47,7 @@ int fs_read(const char *name, uint8_t *buf, uint32_t len) {
     fs_node_t *node = fs_find(name);
     if (!node || node->type != FS_TYPE_FILE) return -1;
     if (len > node->size) len = node->size;
-    memcpy_k(buf, node->data, len);
+    memcpy_k(buf, node->data, (size_t)len);
     return (int)len;
 }
 

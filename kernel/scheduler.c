@@ -5,27 +5,11 @@
 #include "scheduler.h"
 #include "vga.h"
 #include "eventbus.h"
+#include "kstring.h"
 
 static task_t   task_table[SCHED_MAX_TASKS];
 static int      task_count_val = 0;
 static uint32_t sched_tick     = 0;
-
-/* -------------------------------------------------------------------------- */
-
-static int strncmp_k(const char *a, const char *b, int n) {
-    while (n-- > 0) {
-        if (*a != *b) return (int)(unsigned char)*a - (int)(unsigned char)*b;
-        if (*a == '\0') return 0;
-        a++; b++;
-    }
-    return 0;
-}
-
-static void strncpy_k(char *dst, const char *src, int n) {
-    int i = 0;
-    while (i < n - 1 && src[i]) { dst[i] = src[i]; i++; }
-    dst[i] = '\0';
-}
 
 /* -------------------------------------------------------------------------- */
 

@@ -7,6 +7,7 @@
 #include "plugin.h"
 #include "eventbus.h"
 #include "vga.h"
+#include "kstring.h"
 
 static mirror_snapshot_t snapshots[MIRROR_SLOTS];
 static uint32_t          sync_count = 0;
@@ -16,10 +17,21 @@ static uint32_t          sync_count = 0;
 
 /* -------------------------------------------------------------------------- */
 
-static void strncpy_k(char *dst, const char *src, int n) {
-    int i = 0;
-    while (i < n - 1 && src[i]) { dst[i] = src[i]; i++; }
-    dst[i] = '\0';
+/* Compute XOR checksum over all snapshot fields except 'checksum' and 'valid' */
+static uint32_t snapshot_checksum(const mirror_snapshot_t *s) {
+    uint32_t csum = 0;
+    /* XOR the label bytes as 32-bit words */
+    for (int i = 0; i < MIRROR_LABEL_LEN; i++) {
+        csum ^= (uint32_t)(unsigned char)s->label[i];
+    }
+    csum ^= s->timestamp;
+    csum ^= s->flags;
+    csum ^= s->mem_used;
+    csum ^= s->mem_free;
+    csum ^= s->proc_count;
+    csum ^= s->plugin_count;
+    csum ^= s->event_pending;
+    return csum;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -44,6 +56,7 @@ void mirror_sync(void) {
     snapshots[LIVE_SLOT].proc_count   = 0; /* populated by scheduler */
     snapshots[LIVE_SLOT].plugin_count = (uint32_t)plugin_count();
     snapshots[LIVE_SLOT].event_pending= eventbus_pending();
+    snapshots[LIVE_SLOT].checksum     = snapshot_checksum(&snapshots[LIVE_SLOT]);
     snapshots[LIVE_SLOT].valid        = 1;
     strncpy_k(snapshots[LIVE_SLOT].label, "LIVE", MIRROR_LABEL_LEN);
 
@@ -62,12 +75,17 @@ aura_status_t mirror_capture(uint8_t slot, const char *label, uint32_t flags) {
     snapshots[slot]       = snapshots[LIVE_SLOT];
     snapshots[slot].flags = flags;
     strncpy_k(snapshots[slot].label, label, MIRROR_LABEL_LEN);
+    snapshots[slot].checksum = snapshot_checksum(&snapshots[slot]);
     snapshots[slot].valid = 1;
     return AURA_OK;
 }
 
 aura_status_t mirror_restore(uint8_t slot) {
     if (slot >= MIRROR_SLOTS || !snapshots[slot].valid) return AURA_ERR;
+    if (mirror_verify(slot) != AURA_OK) {
+        vga_println("[Mirror] Restore aborted: checksum mismatch!");
+        return AURA_ERR;
+    }
     /* In a real OS this would restore memory pages, process tables, etc.
      * For AI Aura OS we log the restore event and publish on event bus. */
     eventbus_publish(TOPIC_MIRROR_SYNC, (uint32_t)slot | 0x80000000UL);
@@ -86,9 +104,11 @@ void mirror_dump(uint8_t slot) {
         vga_println(" is empty.");
         return;
     }
+    int ok = (mirror_verify(slot) == AURA_OK);
     vga_print("[Mirror] Slot "); vga_print_dec(slot);
-    vga_print(" label=");        vga_println(snapshots[slot].label);
-    vga_print("  tick=");        vga_print_dec(snapshots[slot].timestamp);
+    vga_print(" label=");        vga_print(snapshots[slot].label);
+    vga_print(ok ? "  [OK]" : "  [BAD CHECKSUM]");
+    vga_print("\n  tick=");      vga_print_dec(snapshots[slot].timestamp);
     vga_print("  mem_used=");    vga_print_dec(snapshots[slot].mem_used);
     vga_print("  mem_free=");    vga_print_dec(snapshots[slot].mem_free);
     vga_print("  plugins=");     vga_print_dec(snapshots[slot].plugin_count);
@@ -100,4 +120,10 @@ void mirror_dump_all(void) {
     for (int i = 0; i < MIRROR_SLOTS; i++) {
         mirror_dump((uint8_t)i);
     }
+}
+
+aura_status_t mirror_verify(uint8_t slot) {
+    if (slot >= MIRROR_SLOTS || !snapshots[slot].valid) return AURA_ERR;
+    uint32_t expected = snapshot_checksum(&snapshots[slot]);
+    return (snapshots[slot].checksum == expected) ? AURA_OK : AURA_ERR;
 }
