@@ -34,8 +34,13 @@ void vga_set_color(vga_color_t fg, vga_color_t bg);
 void vga_putchar(char c);
 void vga_print(const char *str);
 void vga_println(const char *str);
+void vga_puts(const char *str);           /* alias: print str as-is (no added newline) */
+void vga_printf(const char *fmt, ...);    /* minimal printf: %c %s %d %u %x */
 void vga_print_hex(uint32_t val);
 void vga_print_dec(uint32_t val);
 void vga_set_cursor(uint8_t row, uint8_t col);
+
+/* Optional serial mirror hook — set by the serial adapter after init */
+void vga_set_serial_hook(void (*fn)(char c));
 
 #endif /* VGA_H */

@@ -5,6 +5,12 @@
 #include "vga.h"
 #include "io.h"
 
+/* Minimal variadic support — no stdarg in freestanding without libc */
+typedef __builtin_va_list va_list;
+#define va_start(ap, last)  __builtin_va_start(ap, last)
+#define va_arg(ap, type)    __builtin_va_arg(ap, type)
+#define va_end(ap)          __builtin_va_end(ap)
+
 #define VGA_WIDTH   80
 #define VGA_HEIGHT  25
 #define VGA_BUFFER  ((volatile uint16_t *)0xB8000)
@@ -13,6 +19,9 @@
 static uint8_t  vga_row;
 static uint8_t  vga_col;
 static uint8_t  vga_color;
+
+/* Optional serial mirror: set by adapter_serial after init */
+static void (*g_serial_hook)(char c) = (void *)0;
 
 /* -------------------------------------------------------------------------- */
 
@@ -112,6 +121,7 @@ void vga_putchar(char c) {
     if (vga_row >= VGA_HEIGHT) {
         vga_scroll();
     }
+    if (g_serial_hook) g_serial_hook(c);
     vga_update_cursor();
 }
 
@@ -149,4 +159,63 @@ void vga_print_dec(uint32_t val) {
     for (int j = i - 1; j >= 0; j--) {
         vga_putchar(buf[j]);
     }
+}
+
+void vga_puts(const char *str) {
+    vga_print(str);
+}
+
+void vga_printf(const char *fmt, ...) {
+    if (!fmt) return;
+    va_list ap;
+    va_start(ap, fmt);
+    while (*fmt) {
+        if (*fmt != '%') {
+            vga_putchar(*fmt++);
+            continue;
+        }
+        fmt++; /* skip '%' */
+        switch (*fmt) {
+            case 'c': {
+                char c = (char)va_arg(ap, int);
+                vga_putchar(c);
+                break;
+            }
+            case 's': {
+                const char *s = va_arg(ap, const char *);
+                vga_print(s ? s : "(null)");
+                break;
+            }
+            case 'd': {
+                int v = va_arg(ap, int);
+                if (v < 0) { vga_putchar('-'); vga_print_dec((uint32_t)(-v)); }
+                else        { vga_print_dec((uint32_t)v); }
+                break;
+            }
+            case 'u': {
+                uint32_t v = va_arg(ap, uint32_t);
+                vga_print_dec(v);
+                break;
+            }
+            case 'x':
+            case 'X': {
+                uint32_t v = va_arg(ap, uint32_t);
+                vga_print_hex(v);
+                break;
+            }
+            case '%':
+                vga_putchar('%');
+                break;
+            default:
+                vga_putchar('%');
+                vga_putchar(*fmt);
+                break;
+        }
+        fmt++;
+    }
+    va_end(ap);
+}
+
+void vga_set_serial_hook(void (*fn)(char c)) {
+    g_serial_hook = fn;
 }

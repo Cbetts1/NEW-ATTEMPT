@@ -6,26 +6,18 @@
 
 #include "loader.h"
 #include <stddef.h>
+#include "../kernel/kstring.h"
 
 /* Forward declarations for built-in modules */
 extern int mod_hello_load(void);
+extern int mod_aura_core_load(void);
 
 /* Static module registry */
 static module_entry_t module_registry[] = {
-    { "hello",  mod_hello_load, 0 },
-    { NULL,     NULL,           0 },
+    { "hello",     mod_hello_load,     0 },
+    { "aura_core", mod_aura_core_load, 0 },
+    { NULL,        NULL,               0 },
 };
-
-/* -------------------------------------------------------------------------- */
-
-static int strncmp_k(const char *a, const char *b, int n) {
-    while (n-- > 0) {
-        if (*a != *b) return (int)(unsigned char)*a - (int)(unsigned char)*b;
-        if (*a == '\0') return 0;
-        a++; b++;
-    }
-    return 0;
-}
 
 /* -------------------------------------------------------------------------- */
 

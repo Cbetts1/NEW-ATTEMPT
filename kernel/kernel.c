@@ -13,6 +13,11 @@
 #include "mirror.h"
 #include "scheduler.h"
 #include "menu.h"
+#include "keyboard.h"
+#include "../env/env.h"
+#include "../env/fs.h"
+#include "../modules/loader.h"
+#include "../adapters/adapter.h"
 
 /* -------------------------------------------------------------------------
  * Global kernel state
@@ -72,13 +77,37 @@ void kernel_main(void) {
     scheduler_init();
     vga_println("[OK] Scheduler initialized");
 
-    /* 7. Register built-in kernel tasks */
-    scheduler_add_task("heartbeat",   kernel_heartbeat,  1);
-    scheduler_add_task("event_drain", eventbus_process,  1);
-    scheduler_add_task("mirror_sync", mirror_sync,      10);
-    scheduler_add_task("plugin_tick", plugin_tick_all,   5);
+    /* 7. Environment registry and virtual filesystem */
+    env_init();
+    vga_println("[OK] Environment registry initialized");
+    fs_init();
+    vga_println("[OK] Virtual filesystem initialized");
+
+    /* 8. Keyboard driver */
+    keyboard_init();
+    vga_println("[OK] Keyboard driver initialized");
+
+    /* 9. Register built-in kernel tasks */
+    scheduler_add_task("heartbeat",    kernel_heartbeat,  1);
+    scheduler_add_task("event_drain",  eventbus_process,  1);
+    scheduler_add_task("mirror_sync",  mirror_sync,      10);
+    scheduler_add_task("plugin_tick",  plugin_tick_all,   5);
+    scheduler_add_task("keyboard_poll",keyboard_poll,     1);
+    scheduler_add_task("menu_tick",    menu_tick,         2);
+    scheduler_add_task("serial_poll",  serial_poll,       5);
 
     vga_println("[OK] Built-in tasks registered");
+
+    /* 10. Load built-in modules (hello, aura_core) */
+    loader_init();
+    loader_load_all();
+    vga_println("[OK] Modules loaded");
+
+    /* 11. Register hardware adapters */
+    adapter_serial_register();
+    adapter_net_register();
+    vga_println("[OK] Adapters registered");
+
     vga_println("==================================");
 
     /* 8. Transition to running state and show main menu */

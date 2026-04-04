@@ -4,23 +4,9 @@
 
 #include "env.h"
 #include <stddef.h>
+#include "../kernel/kstring.h"
 
 static env_var_t env_table[ENV_MAX_VARS];
-
-static int strncmp_k(const char *a, const char *b, int n) {
-    while (n-- > 0) {
-        if (*a != *b) return (int)(unsigned char)*a - (int)(unsigned char)*b;
-        if (*a == '\0') return 0;
-        a++; b++;
-    }
-    return 0;
-}
-
-static void strncpy_k(char *dst, const char *src, int n) {
-    int i = 0;
-    while (i < n - 1 && src[i]) { dst[i] = src[i]; i++; }
-    dst[i] = '\0';
-}
 
 void env_init(void) {
     for (int i = 0; i < ENV_MAX_VARS; i++) {

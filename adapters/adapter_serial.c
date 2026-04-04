@@ -8,6 +8,7 @@
 #include "../kernel/plugin.h"
 #include "../kernel/io.h"
 #include "../kernel/vga.h"
+#include "../kernel/kstring.h"
 
 #define COM1_PORT       0x3F8
 #define COM1_DATA       (COM1_PORT + 0)
@@ -64,6 +65,17 @@ static aura_status_t serial_ioctl(uint32_t cmd, void *arg) {
     return AURA_OK;
 }
 
+/* Mirror each VGA character out the serial port */
+static void serial_mirror_char(char c) {
+    uint8_t b = (uint8_t)c;
+    /* Translate bare '\n' to '\r\n' for serial terminals */
+    if (c == '\n') {
+        uint8_t cr = '\r';
+        serial_write(&cr, 1);
+    }
+    serial_write(&b, 1);
+}
+
 /* -------------------------------------------------------------------------- */
 
 static adapter_t serial_adapter = {
@@ -86,24 +98,29 @@ static aura_status_t serial_plugin_init(void) {
         serial_adapter.open = 1;
         const uint8_t banner[] = "AI Aura OS serial console ready\r\n";
         serial_write(banner, sizeof(banner) - 1);
+        /* Enable VGA→serial mirroring */
+        vga_set_serial_hook(serial_mirror_char);
         vga_println("[serial] COM1 adapter initialized.");
     }
     return r;
 }
 
 static aura_status_t serial_plugin_shutdown(void) {
+    vga_set_serial_hook((void *)0);
     serial_close();
     serial_adapter.open = 0;
     return AURA_OK;
 }
 
+/* Serial poll: drain incoming COM1 bytes (currently discarded; extend as needed) */
+void serial_poll(void) {
+    uint8_t buf[16];
+    serial_read(buf, sizeof(buf));
+}
+
 aura_status_t adapter_register(adapter_t *adp) {
     plugin_desc_t desc = {0};
-    int i = 0;
-    while (i < PLUGIN_NAME_LEN - 1 && adp->name[i]) {
-        desc.name[i] = adp->name[i]; i++;
-    }
-    desc.name[i]   = '\0';
+    strncpy_k(desc.name, adp->name, PLUGIN_NAME_LEN);
     desc.version[0]= '1'; desc.version[1] = '\0';
     desc.type      = PLUGIN_TYPE_ADAPTER;
     desc.init      = serial_plugin_init;
@@ -115,7 +132,7 @@ aura_status_t adapter_register(adapter_t *adp) {
     return r;
 }
 
-/* Called at build time to register the serial adapter */
+/* Called from kernel_main() to register the serial adapter */
 void adapter_serial_register(void) {
     adapter_register(&serial_adapter);
 }

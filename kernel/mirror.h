@@ -29,6 +29,7 @@ typedef struct {
     uint32_t proc_count;
     uint32_t plugin_count;
     uint32_t event_pending;
+    uint32_t checksum;          /* XOR checksum of all preceding fields */
     uint8_t  valid;
 } mirror_snapshot_t;
 
@@ -36,6 +37,7 @@ void          mirror_init(void);
 void          mirror_sync(void);                    /* Continuous sync hook */
 aura_status_t mirror_capture(uint8_t slot, const char *label, uint32_t flags);
 aura_status_t mirror_restore(uint8_t slot);
+aura_status_t mirror_verify(uint8_t slot);          /* XOR checksum check */
 void          mirror_dump(uint8_t slot);            /* Print snapshot to VGA */
 void          mirror_dump_all(void);
 
