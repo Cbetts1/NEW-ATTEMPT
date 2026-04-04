@@ -35,13 +35,11 @@ static void on_heartbeat(const event_t *ev)
     static const char spinner[] = "-\\|/";
     static int        spin_idx  = 0;
 
-    uint8_t saved_color = 0;
-    (void)saved_color;
-
+    uint8_t prev_color = VGA_COLOR(VGA_LIGHT_GREEN, VGA_BLACK);
     vga_set_cursor(79, 0);
     vga_set_color(VGA_COLOR(VGA_CYAN, VGA_BLACK));
     vga_putchar(spinner[spin_idx++ & 3]);
-    vga_set_color(VGA_COLOR(VGA_LIGHT_GREEN, VGA_BLACK));
+    vga_set_color(prev_color);
 }
 
 /* ── Startup banner ──────────────────────────────────────────────────────── */

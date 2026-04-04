@@ -117,8 +117,13 @@ static void print_uint(unsigned int n, int base)
 
 static void print_int(int n)
 {
-    if (n < 0) { vga_putchar('-'); n = -n; }
-    print_uint((unsigned int)n, 10);
+    if (n < 0) {
+        vga_putchar('-');
+        /* Cast to unsigned before negation to avoid UB on INT_MIN */
+        print_uint((unsigned int)(-(unsigned int)n), 10);
+    } else {
+        print_uint((unsigned int)n, 10);
+    }
 }
 
 void vga_printf(const char *fmt, ...)

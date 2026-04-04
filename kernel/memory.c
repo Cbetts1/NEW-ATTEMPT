@@ -28,8 +28,10 @@ static block_header_t *heap_head = (void *)0;
 
 static void split_block(block_header_t *blk, size_t needed)
 {
+    /* Only split if the remainder would be large enough to hold a header
+     * plus at least one minimum-size allocation (avoids unusably tiny fragments) */
     if (blk->size <= needed + HDR_SIZE + MEM_BLOCK_SIZE)
-        return;  /* not worth splitting */
+        return;
 
     block_header_t *newblk = (block_header_t *)((uint8_t *)blk + HDR_SIZE + needed);
     newblk->magic = BLOCK_MAGIC;

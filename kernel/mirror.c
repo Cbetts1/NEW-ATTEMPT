@@ -74,7 +74,10 @@ void mirror_capture(uint32_t subsys_mask)
     snap->timestamp   = tick_ctr;
     snap->subsys_mask = subsys_mask;
 
-    uint8_t *p   = snap->payload;
+    /* Zero payload so unused bytes are deterministic for checksum */
+    kmemset(snap->payload, 0, sizeof(snap->payload));
+
+    uint8_t *p    = snap->payload;
     size_t   used = 0;
     size_t   rem  = sizeof(snap->payload);
 
@@ -90,8 +93,10 @@ void mirror_capture(uint32_t subsys_mask)
         size_t n = serialise_device(p + used, rem - used);
         used += n;
     }
+    (void)used;
 
-    snap->checksum = xor_checksum(snap->payload, used);
+    /* Checksum the entire (zero-padded) payload for consistency with verify */
+    snap->checksum = xor_checksum(snap->payload, sizeof(snap->payload));
     ring_head++;
 }
 
@@ -102,9 +107,8 @@ int mirror_verify(uint32_t slot)
     if (snap->seq == 0 && snap->checksum == 0) return -1; /* empty slot */
 
     uint32_t recomputed = xor_checksum(snap->payload, sizeof(snap->payload));
-    /* We only stored partial payload; use same logic as capture */
-    (void)recomputed;
-    return 0;  /* simplified: treat all non-empty slots as valid */
+    if (recomputed != snap->checksum) return -1; /* checksum mismatch */
+    return 0;
 }
 
 void mirror_restore(uint32_t slot)
