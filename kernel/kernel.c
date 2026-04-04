@@ -1,133 +1,97 @@
 /* =============================================================================
- * AI Aura OS — Kernel Main
- * File: kernel/kernel.c
- *
- * This is the CPU of AI Aura OS.  kernel_main() is called by entry.asm after
- * the CPU is in 32-bit protected mode.  It initialises every subsystem and
- * then drives the perpetual AI heartbeat loop.
- * =========================================================================== */
-#include "include/vga.h"
-#include "include/memory.h"
-#include "include/event_bus.h"
-#include "include/plugin.h"
-#include "include/mirror.h"
-#include "include/menu.h"
+ * AI Aura OS — Kernel Entry Point
+ * kernel_entry is the first C function called after the bootloader jumps to
+ * the kernel load address (0x10000). It sets up all subsystems, launches the
+ * main menu, and enters the perpetual heartbeat loop.
+ * =============================================================================*/
 
-/* ── Forward declarations for built-in plugin descriptors ────────────────── */
-extern plugin_descriptor_t aura_core_plugin;
-extern plugin_descriptor_t aura_fs_adapter;
-extern plugin_descriptor_t aura_net_adapter;
+#include "kernel.h"
+#include "vga.h"
+#include "memory.h"
+#include "eventbus.h"
+#include "plugin.h"
+#include "mirror.h"
+#include "scheduler.h"
+#include "menu.h"
 
-/* ── Heartbeat tick counter ──────────────────────────────────────────────── */
-static volatile uint32_t heartbeat_ticks = 0;
+/* -------------------------------------------------------------------------
+ * Global kernel state
+ * -------------------------------------------------------------------------*/
+volatile kernel_state_t g_kernel_state = KERNEL_STATE_BOOT;
+volatile uint32_t       g_tick_count   = 0;
 
-/* ── Simple delay loop (roughly calibrated for ~1 GHz QEMU virtual CPU) ──── */
-static void cpu_delay(uint32_t iterations)
-{
-    for (volatile uint32_t i = 0; i < iterations; i++) {}
+/* -------------------------------------------------------------------------
+ * Heartbeat — called every main-loop iteration
+ * -------------------------------------------------------------------------*/
+void kernel_heartbeat(void) {
+    g_tick_count++;
 }
 
-/* ── Heartbeat event handler ─────────────────────────────────────────────── */
-static void on_heartbeat(const event_t *ev)
-{
-    (void)ev;
-    /* Keep display alive — overwrite top-right corner with a spinner */
-    static const char spinner[] = "-\\|/";
-    static int        spin_idx  = 0;
-
-    uint8_t prev_color = VGA_COLOR(VGA_LIGHT_GREEN, VGA_BLACK);
-    vga_set_cursor(79, 0);
-    vga_set_color(VGA_COLOR(VGA_CYAN, VGA_BLACK));
-    vga_putchar(spinner[spin_idx++ & 3]);
-    vga_set_color(prev_color);
+/* -------------------------------------------------------------------------
+ * Panic — halt the system with a message
+ * -------------------------------------------------------------------------*/
+void kernel_panic(const char *msg) {
+    g_kernel_state = KERNEL_STATE_PANIC;
+    vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
+    vga_println("\n*** KERNEL PANIC ***");
+    if (msg) vga_println(msg);
+    vga_println("System halted.");
+    __asm__ volatile ("cli; hlt");
+    while (1) {} /* Should never reach here */
 }
 
-/* ── Startup banner ──────────────────────────────────────────────────────── */
-static void print_banner(void)
-{
-    vga_set_color(VGA_COLOR(VGA_LIGHT_CYAN, VGA_BLACK));
-    vga_puts("##################################################\n");
-    vga_puts("#                                                #\n");
-    vga_puts("#          A I   A U R A   O S   v1.0           #\n");
-    vga_puts("#        Self-Contained Autonomous System        #\n");
-    vga_puts("#                                                #\n");
-    vga_puts("##################################################\n\n");
-    vga_set_color(VGA_COLOR(VGA_LIGHT_GREEN, VGA_BLACK));
-}
+/* -------------------------------------------------------------------------
+ * Kernel entry — called by the bootloader
+ * -------------------------------------------------------------------------*/
+void kernel_main(void) {
+    g_kernel_state = KERNEL_STATE_INIT;
 
-/* ── kernel_main — entry point from assembly stub ────────────────────────── */
-void kernel_main(void)
-{
-    /* 1. VGA driver — must come first (all other subsystems print to screen) */
+    /* 1. VGA driver must come first — all other subsystems may print */
     vga_init();
-    print_banner();
+    vga_set_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+    vga_println("AI Aura OS — Kernel Initializing");
+    vga_println("==================================");
 
     /* 2. Memory manager */
     memory_init();
+    vga_println("[OK] Memory Manager initialized");
 
     /* 3. Event bus */
-    event_bus_init();
-    event_subscribe(EVENT_HEARTBEAT, on_heartbeat);
+    eventbus_init();
+    vga_println("[OK] Event Bus initialized");
 
-    /* 4. Plugin manager + register built-in plugins */
+    /* 4. Plugin manager */
     plugin_manager_init();
-    plugin_register(&aura_core_plugin);
-    plugin_register(&aura_fs_adapter);
-    plugin_register(&aura_net_adapter);
-
-    /* Load all registered plugins */
-    plugin_load("aura.core");
-    plugin_load("aura.fs");
-    plugin_load("aura.net");
+    vga_println("[OK] Plugin Manager initialized");
 
     /* 5. System mirroring engine */
     mirror_init();
+    vga_println("[OK] System Mirror initialized");
 
-    /* 6. Main menu (does not block yet — init only) */
-    menu_init();
+    /* 6. Task scheduler */
+    scheduler_init();
+    vga_println("[OK] Scheduler initialized");
 
-    /* Signal kernel ready */
-    event_publish(EVENT_KERNEL_READY, 0, 0, "AI Aura OS kernel ready");
-    event_dispatch();
+    /* 7. Register built-in kernel tasks */
+    scheduler_add_task("heartbeat",   kernel_heartbeat,  1);
+    scheduler_add_task("event_drain", eventbus_process,  1);
+    scheduler_add_task("mirror_sync", mirror_sync,      10);
+    scheduler_add_task("plugin_tick", plugin_tick_all,   5);
 
-    vga_puts("\n[KERN] All subsystems online. Entering heartbeat loop.\n");
-    vga_puts("[KERN] Press any key to open the main menu.\n\n");
+    vga_println("[OK] Built-in tasks registered");
+    vga_println("==================================");
 
-    /* ── AI Heartbeat Loop ─────────────────────────────────────────────── */
+    /* 8. Transition to running state and show main menu */
+    g_kernel_state = KERNEL_STATE_RUN;
+    menu_run();
+
+    /* -----------------------------------------------------------------------
+     * Perpetual Kernel Heartbeat Loop
+     * Everything in AI Aura OS is driven from this loop via the scheduler.
+     * ----------------------------------------------------------------------- */
     while (1) {
-        heartbeat_ticks++;
-
-        /* Publish heartbeat event */
-        event_publish(EVENT_HEARTBEAT, 0, heartbeat_ticks, (void *)0);
-
-        /* Dispatch all queued events */
-        event_dispatch();
-
-        /* Drive plugin tick callbacks */
-        plugin_tick_all();
-
-        /* Drive mirroring engine */
-        mirror_tick();
-
-        /* Every 500 ticks, print a status line */
-        if (heartbeat_ticks % 500 == 0) {
-            vga_printf("[KERN] Heartbeat tick: %u\n", heartbeat_ticks);
-        }
-
-        /* Check keyboard — non-blocking poll */
-        {
-            /* Read PS/2 status port; 0x01 = output buffer full */
-            uint8_t status;
-            __asm__ volatile ("inb $0x64, %0" : "=a"(status));
-            if (status & 0x01) {
-                /* A key is waiting — hand control to the interactive menu */
-                menu_run();
-                /* menu_run() only returns if we add a "back" option later */
-            }
-        }
-
-        /* Throttle loop to avoid melting the virtual CPU */
-        cpu_delay(100000);
+        scheduler_tick();
     }
-    /* Never reached */
+
+    /* Unreachable — OS is autonomous and never exits */
 }

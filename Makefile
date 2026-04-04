@@ -1,163 +1,187 @@
 # =============================================================================
 # AI Aura OS — Master Makefile
-# =============================================================================
-# Builds the complete OS image (AIOS.img) from source.
+# Builds the complete OS: bootloader + kernel → AIOS.img
 #
-# Host requirements:
-#   nasm              — assembles bootloader and kernel entry
-#   i686-elf-gcc      — bare-metal C cross-compiler  (preferred)
-#   i686-elf-ld       — bare-metal linker            (preferred)
-#
-# Termux fallback (if i686-elf toolchain is unavailable):
-#   apt install nasm gcc binutils qemu-system-x86   (in Termux pkg)
-#   Set USE_SYSTEM_GCC=1 on the make command line.
+# Toolchain: nasm + i686-elf-gcc (cross-compiler)  or  nasm + gcc -m32
+# Termux install: pkg install nasm gcc binutils
 #
 # Usage:
-#   make              — build everything → image/AIOS.img
-#   make run          — build and launch in QEMU
-#   make clean        — remove all build artefacts
-#   make USE_SYSTEM_GCC=1        — use system gcc instead of cross-compiler
+#   make            - Build AIOS.img
+#   make clean      - Remove build artifacts
+#   make run        - Boot with QEMU
+#   make run-serial - Boot with QEMU + serial output to stdout
 # =============================================================================
 
-# ── Toolchain ─────────────────────────────────────────────────────────────────
-NASM := nasm
-
-ifdef USE_SYSTEM_GCC
-    CC  := gcc
-    LD  := ld
-    CFLAGS_ARCH  := -m32
-    LDFLAGS_ARCH := -m elf_i386
+# ---------------------------------------------------------------------------
+# Toolchain detection
+# Prefer i686-elf cross-compiler; fall back to host gcc -m32
+# ---------------------------------------------------------------------------
+ifneq ($(shell which i686-elf-gcc 2>/dev/null),)
+    CC      := i686-elf-gcc
+    LD      := i686-elf-ld
+    OBJCOPY := i686-elf-objcopy
+    CROSS   := 1
 else
-    CC  := i686-elf-gcc
-    LD  := i686-elf-ld
-    CFLAGS_ARCH  :=
-    LDFLAGS_ARCH :=
+    CC      := gcc
+    LD      := ld
+    OBJCOPY := objcopy
+    CROSS   := 0
 endif
 
-CFLAGS := $(CFLAGS_ARCH) \
-          -std=c99       \
-          -ffreestanding \
-          -fno-builtin   \
-          -fno-stack-protector \
-          -nostdlib      \
-          -Wall          \
-          -Wextra        \
-          -O2            \
-          -Ikernel
+AS      := nasm
+QEMU    := qemu-system-i386
 
-LDFLAGS := $(LDFLAGS_ARCH) \
-           -nostdlib        \
-           -T kernel/link.ld
+# ---------------------------------------------------------------------------
+# Flags
+# ---------------------------------------------------------------------------
+ASFLAGS  := -f bin
 
-# ── Directories ───────────────────────────────────────────────────────────────
-BUILD := build
-IMAGE := image
+ifeq ($(CROSS),1)
+CFLAGS   := -std=c99 -ffreestanding -O2 -Wall -Wextra \
+            -fno-stack-protector -fno-builtin \
+            -I kernel -I env -I modules -I adapters
+LDFLAGS  := -T kernel/kernel.ld -nostdlib
+else
+CFLAGS   := -std=c99 -m32 -ffreestanding -O2 -Wall -Wextra \
+            -fno-stack-protector -fno-builtin \
+            -I kernel -I env -I modules -I adapters
+LDFLAGS  := -T kernel/kernel.ld -melf_i386 -nostdlib
+endif
 
-# ── Sources ───────────────────────────────────────────────────────────────────
-KERNEL_C_SRCS := \
-    kernel/kernel.c   \
-    kernel/vga.c      \
-    kernel/memory.c   \
-    kernel/event_bus.c \
-    kernel/plugin.c   \
-    kernel/mirror.c   \
-    kernel/menu.c     \
-    modules/aura_core.c \
-    adapters/aura_fs.c  \
-    adapters/aura_net.c
+# ---------------------------------------------------------------------------
+# Directories
+# ---------------------------------------------------------------------------
+BUILD_DIR := build
+IMAGE_DIR := image
+IMAGE     := $(IMAGE_DIR)/AIOS.img
 
-KERNEL_ASM_SRCS := kernel/entry.asm
-BOOT_ASM_SRC    := bootloader/boot.asm
+# ---------------------------------------------------------------------------
+# Source files
+# ---------------------------------------------------------------------------
+KERNEL_SRCS := \
+    kernel/kernel.c    \
+    kernel/vga.c       \
+    kernel/memory.c    \
+    kernel/eventbus.c  \
+    kernel/plugin.c    \
+    kernel/mirror.c    \
+    kernel/scheduler.c \
+    kernel/menu.c
 
-# ── Object files ──────────────────────────────────────────────────────────────
-KERNEL_C_OBJS   := $(patsubst %.c,   $(BUILD)/%.o, $(KERNEL_C_SRCS))
-KERNEL_ASM_OBJS := $(patsubst %.asm, $(BUILD)/%.o, $(KERNEL_ASM_SRCS))
-BOOT_OBJ        := $(BUILD)/bootloader/boot.bin
+ENV_SRCS := \
+    env/env.c  \
+    env/fs.c
 
-KERNEL_BIN      := $(BUILD)/kernel.bin
-AIOS_IMG        := $(IMAGE)/AIOS.img
+MODULE_SRCS := \
+    modules/loader.c   \
+    modules/mod_hello.c
 
-# ── Default target ────────────────────────────────────────────────────────────
-.PHONY: all
-all: $(AIOS_IMG)
+ADAPTER_SRCS := \
+    adapters/adapter_serial.c
+
+ALL_C_SRCS := $(KERNEL_SRCS) $(ENV_SRCS) $(MODULE_SRCS) $(ADAPTER_SRCS)
+
+KERNEL_OBJS := $(patsubst %.c, $(BUILD_DIR)/%.o, $(ALL_C_SRCS))
+
+BOOT_BIN   := $(BUILD_DIR)/bootloader/boot.bin
+KERNEL_BIN := $(BUILD_DIR)/kernel.bin
+
+# ---------------------------------------------------------------------------
+# Phony targets
+# ---------------------------------------------------------------------------
+.PHONY: all clean run run-serial directories info
+
+all: directories $(IMAGE)
 	@echo ""
-	@echo "  ╔══════════════════════════════════════╗"
-	@echo "  ║   AI Aura OS image built: AIOS.img   ║"
-	@echo "  ╚══════════════════════════════════════╝"
-	@echo ""
+	@echo "  ================================================="
+	@echo "   AI Aura OS build complete: $(IMAGE)"
+	@echo "  ================================================="
 
-# ── Final disk image ──────────────────────────────────────────────────────────
-$(AIOS_IMG): $(BOOT_OBJ) $(KERNEL_BIN) | $(IMAGE)
-	@echo "[IMG] Creating disk image: $(AIOS_IMG)"
-	dd if=/dev/zero    of=$(AIOS_IMG)  bs=512  count=2880  status=none
-	dd if=$(BOOT_OBJ)  of=$(AIOS_IMG)  bs=512  count=1     conv=notrunc status=none
-	dd if=$(KERNEL_BIN) of=$(AIOS_IMG) bs=512  seek=1      conv=notrunc status=none
+# ---------------------------------------------------------------------------
+# Create output directories
+# ---------------------------------------------------------------------------
+directories:
+	@mkdir -p $(BUILD_DIR)/bootloader
+	@mkdir -p $(BUILD_DIR)/kernel
+	@mkdir -p $(BUILD_DIR)/env
+	@mkdir -p $(BUILD_DIR)/modules
+	@mkdir -p $(BUILD_DIR)/adapters
+	@mkdir -p $(IMAGE_DIR)
 
-# ── Kernel binary (linked) ────────────────────────────────────────────────────
-$(KERNEL_BIN): $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS) | $(BUILD)
-	@echo "[LD ] Linking kernel → $(KERNEL_BIN)"
-	$(LD) $(LDFLAGS) -o $(KERNEL_BIN) $(KERNEL_ASM_OBJS) $(KERNEL_C_OBJS)
+# ---------------------------------------------------------------------------
+# Assemble bootloader → flat binary (512 bytes, MBR)
+# ---------------------------------------------------------------------------
+$(BOOT_BIN): bootloader/boot.asm
+	@echo "[AS]  $<"
+	$(AS) $(ASFLAGS) -o $@ $<
 
-# ── Bootloader binary ─────────────────────────────────────────────────────────
-$(BOOT_OBJ): $(BOOT_ASM_SRC) | $(BUILD)/bootloader
-	@echo "[ASM] Assembling bootloader → $(BOOT_OBJ)"
-	$(NASM) -f bin -o $(BOOT_OBJ) $(BOOT_ASM_SRC)
-
-# ── Kernel entry (ASM → ELF object) ──────────────────────────────────────────
-$(BUILD)/kernel/entry.o: kernel/entry.asm | $(BUILD)/kernel
-	@echo "[ASM] Assembling $< → $@"
-	$(NASM) -f elf32 -o $@ $<
-
-# ── C sources → ELF objects ───────────────────────────────────────────────────
-$(BUILD)/kernel/%.o: kernel/%.c | $(BUILD)/kernel
-	@echo "[CC ] Compiling $< → $@"
+# ---------------------------------------------------------------------------
+# Compile kernel C sources → object files
+# ---------------------------------------------------------------------------
+$(BUILD_DIR)/kernel/%.o: kernel/%.c
+	@echo "[CC]  $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/modules/%.o: modules/%.c | $(BUILD)/modules
-	@echo "[CC ] Compiling $< → $@"
+$(BUILD_DIR)/env/%.o: env/%.c
+	@echo "[CC]  $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/adapters/%.o: adapters/%.c | $(BUILD)/adapters
-	@echo "[CC ] Compiling $< → $@"
+$(BUILD_DIR)/modules/%.o: modules/%.c
+	@echo "[CC]  $<"
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# ── Directory rules ───────────────────────────────────────────────────────────
-$(BUILD) $(IMAGE) $(BUILD)/bootloader $(BUILD)/kernel $(BUILD)/modules $(BUILD)/adapters:
-	@mkdir -p $@
+$(BUILD_DIR)/adapters/%.o: adapters/%.c
+	@echo "[CC]  $<"
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# ── Run in QEMU ───────────────────────────────────────────────────────────────
-.PHONY: run
-run: $(AIOS_IMG)
-	@echo "[RUN] Launching AI Aura OS in QEMU..."
-	qemu-system-i386 \
-	    -drive file=$(AIOS_IMG),format=raw,if=ide \
-	    -display sdl \
-	    -m 64M \
-	    -no-reboot
+# ---------------------------------------------------------------------------
+# Link kernel objects → ELF → strip to flat binary
+# ---------------------------------------------------------------------------
+$(KERNEL_BIN): $(KERNEL_OBJS) kernel/kernel.ld
+	@echo "[LD]  kernel ELF"
+	$(LD) $(LDFLAGS) -o $(BUILD_DIR)/kernel.elf $(KERNEL_OBJS)
+	@echo "[BIN] stripping to flat binary"
+	$(OBJCOPY) -O binary $(BUILD_DIR)/kernel.elf $@
 
-# ── Run headless (for Termux / CI) ───────────────────────────────────────────
-.PHONY: run-nographic
-run-nographic: $(AIOS_IMG)
-	qemu-system-i386 \
-	    -drive file=$(AIOS_IMG),format=raw,if=ide \
-	    -nographic \
-	    -m 64M \
-	    -no-reboot \
-	    -serial stdio
+# ---------------------------------------------------------------------------
+# Pack bootloader + kernel binary into a disk image
+# Bootloader  = sector 1 (512 bytes)
+# Kernel      = sectors 2..N (padded to 512-byte boundary)
+# Total image = 1.44 MB floppy image
+# ---------------------------------------------------------------------------
+$(IMAGE): $(BOOT_BIN) $(KERNEL_BIN)
+	@echo "[IMG] Building $(IMAGE)"
+	@# Create a blank 1.44 MB floppy image
+	dd if=/dev/zero of=$@ bs=512 count=2880 status=none
+	@# Write bootloader to sector 1
+	dd if=$(BOOT_BIN) of=$@ bs=512 count=1 conv=notrunc status=none
+	@# Write kernel starting at sector 2 (offset 512 bytes)
+	dd if=$(KERNEL_BIN) of=$@ bs=512 seek=1 conv=notrunc status=none
+	@echo "[IMG] Image size: $$(wc -c < $@) bytes"
 
-# ── Clean ─────────────────────────────────────────────────────────────────────
-.PHONY: clean
+# ---------------------------------------------------------------------------
+# Run in QEMU
+# ---------------------------------------------------------------------------
+run: all
+	$(QEMU) -drive format=raw,file=$(IMAGE) -m 32M
+
+run-serial: all
+	$(QEMU) -drive format=raw,file=$(IMAGE) -m 32M \
+	        -serial stdio -display none
+
+# ---------------------------------------------------------------------------
+# Clean
+# ---------------------------------------------------------------------------
 clean:
-	@echo "[CLN] Removing build artefacts"
-	rm -rf $(BUILD) $(IMAGE)
+	@echo "[CLEAN] Removing build artifacts"
+	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
 
-# ── Info ──────────────────────────────────────────────────────────────────────
-.PHONY: info
+# ---------------------------------------------------------------------------
+# Build info
+# ---------------------------------------------------------------------------
 info:
-	@echo "Toolchain:"
-	@echo "  CC   = $(CC)"
-	@echo "  LD   = $(LD)"
-	@echo "  NASM = $(NASM)"
-	@echo "Sources:"
-	@echo "  ASM  = $(BOOT_ASM_SRC) $(KERNEL_ASM_SRCS)"
-	@echo "  C    = $(KERNEL_C_SRCS)"
+	@echo "Compiler : $(CC)"
+	@echo "Assembler: $(AS)"
+	@echo "Linker   : $(LD)"
+	@echo "Image    : $(IMAGE)"
+	@echo "C sources: $(ALL_C_SRCS)"

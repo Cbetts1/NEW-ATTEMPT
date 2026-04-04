@@ -1,122 +1,153 @@
 /* =============================================================================
- * AI Aura OS — Plugin / Adapter Manager
- * File: kernel/plugin.c
- *
- * Central registry for all loadable modules, adapters, and drivers.
- * Plugins are registered at compile-time; the manager can activate/deactivate
- * them and drives their tick() callbacks from the heartbeat loop.
- * =========================================================================== */
-#include "include/plugin.h"
-#include "include/vga.h"
-#include "include/event_bus.h"
-#include "include/memory.h"
+ * AI Aura OS — Plugin / Adapter Manager Implementation
+ * =============================================================================*/
 
-static plugin_entry_t registry[PLUGIN_MAX];
-static int            plugin_count = 0;
-static uint32_t       next_id      = 1;
+#include "plugin.h"
+#include "vga.h"
+#include "eventbus.h"
+#include "memory.h"
 
-/* ── string helper ───────────────────────────────────────────────────────── */
-static int kstrcmp(const char *a, const char *b)
-{
-    while (*a && *a == *b) { a++; b++; }
-    return (unsigned char)*a - (unsigned char)*b;
-}
+static plugin_slot_t plugin_table[PLUGIN_MAX];
+static int           plugin_count_val = 0;
 
-/* ── Public API ──────────────────────────────────────────────────────────── */
+/* -------------------------------------------------------------------------- */
 
-void plugin_manager_init(void)
-{
-    plugin_count = 0;
-    next_id      = 1;
-    kmemset(registry, 0, sizeof(registry));
-    vga_puts("[PLG] Plugin manager initialised.\n");
-}
-
-int plugin_register(plugin_descriptor_t *desc)
-{
-    if (!desc) return -1;
-    if (plugin_count >= PLUGIN_MAX) {
-        vga_puts("[PLG] register: registry full\n");
-        return -1;
+static int strncmp_k(const char *a, const char *b, int n) {
+    while (n-- > 0) {
+        if (*a != *b) return (int)(unsigned char)*a - (int)(unsigned char)*b;
+        if (*a == '\0') return 0;
+        a++; b++;
     }
-    registry[plugin_count].desc  = desc;
-    registry[plugin_count].state = PLUGIN_STATE_LOADED;
-    registry[plugin_count].id    = next_id++;
-    plugin_count++;
-
-    vga_printf("[PLG] Registered: %s (v%x)\n", desc->name, desc->version);
     return 0;
 }
 
-int plugin_load(const char *name)
-{
-    for (int i = 0; i < plugin_count; i++) {
-        if (kstrcmp(registry[i].desc->name, name) == 0) {
-            if (registry[i].state == PLUGIN_STATE_ACTIVE) return 0;
-            int rc = 0;
-            if (registry[i].desc->init)
-                rc = registry[i].desc->init();
-            if (rc == 0) {
-                registry[i].state = PLUGIN_STATE_ACTIVE;
-                event_publish(EVENT_PLUGIN_LOADED, registry[i].id, 0, name);
-                vga_printf("[PLG] Loaded: %s\n", name);
-            } else {
-                registry[i].state = PLUGIN_STATE_ERROR;
-                vga_printf("[PLG] LOAD ERROR: %s (rc=%d)\n", name, rc);
+static void strncpy_k(char *dst, const char *src, int n) {
+    int i = 0;
+    while (i < n - 1 && src[i]) { dst[i] = src[i]; i++; }
+    dst[i] = '\0';
+}
+
+/* -------------------------------------------------------------------------- */
+
+void plugin_manager_init(void) {
+    for (int i = 0; i < PLUGIN_MAX; i++) {
+        plugin_table[i].state       = PLUGIN_STATE_UNLOADED;
+        plugin_table[i].tick_count  = 0;
+        plugin_table[i].error_count = 0;
+    }
+    plugin_count_val = 0;
+}
+
+aura_status_t plugin_register(const plugin_desc_t *desc) {
+    if (!desc) return AURA_ERR;
+    if (plugin_count_val >= PLUGIN_MAX) return AURA_NOSLOT;
+
+    /* Check for duplicate name */
+    if (plugin_find(desc->name)) return AURA_ERR;
+
+    int slot = -1;
+    for (int i = 0; i < PLUGIN_MAX; i++) {
+        if (plugin_table[i].state == PLUGIN_STATE_UNLOADED) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) return AURA_NOSLOT;
+
+    plugin_table[slot].desc       = *desc;
+    plugin_table[slot].state      = PLUGIN_STATE_LOADED;
+    plugin_table[slot].tick_count = 0;
+    plugin_table[slot].error_count= 0;
+
+    extern volatile uint32_t g_tick_count;
+    plugin_table[slot].load_tick  = g_tick_count;
+    plugin_count_val++;
+
+    eventbus_publish(TOPIC_PLUGIN_LOADED, (uint32_t)slot);
+    return AURA_OK;
+}
+
+aura_status_t plugin_unregister(const char *name) {
+    plugin_slot_t *s = plugin_find(name);
+    if (!s) return AURA_NOTFOUND;
+    if (s->state == PLUGIN_STATE_ACTIVE && s->desc.shutdown) {
+        s->desc.shutdown();
+    }
+    eventbus_publish(TOPIC_PLUGIN_UNLOADED, 0);
+    s->state = PLUGIN_STATE_UNLOADED;
+    plugin_count_val--;
+    return AURA_OK;
+}
+
+aura_status_t plugin_activate(const char *name) {
+    plugin_slot_t *s = plugin_find(name);
+    if (!s) return AURA_NOTFOUND;
+    if (s->state != PLUGIN_STATE_LOADED) return AURA_ERR;
+    if (s->desc.init) {
+        aura_status_t r = s->desc.init();
+        if (r != AURA_OK) {
+            s->state = PLUGIN_STATE_ERROR;
+            s->error_count++;
+            return r;
+        }
+    }
+    s->state = PLUGIN_STATE_ACTIVE;
+    return AURA_OK;
+}
+
+aura_status_t plugin_deactivate(const char *name) {
+    plugin_slot_t *s = plugin_find(name);
+    if (!s) return AURA_NOTFOUND;
+    if (s->state != PLUGIN_STATE_ACTIVE) return AURA_ERR;
+    if (s->desc.shutdown) s->desc.shutdown();
+    s->state = PLUGIN_STATE_LOADED;
+    return AURA_OK;
+}
+
+void plugin_tick_all(void) {
+    for (int i = 0; i < PLUGIN_MAX; i++) {
+        if (plugin_table[i].state == PLUGIN_STATE_ACTIVE &&
+            plugin_table[i].desc.tick) {
+            aura_status_t r = plugin_table[i].desc.tick();
+            plugin_table[i].tick_count++;
+            if (r != AURA_OK) {
+                plugin_table[i].error_count++;
             }
-            return rc;
-        }
-    }
-    vga_printf("[PLG] load: plugin '%s' not found\n", name);
-    return -1;
-}
-
-int plugin_unload(const char *name)
-{
-    for (int i = 0; i < plugin_count; i++) {
-        if (kstrcmp(registry[i].desc->name, name) == 0) {
-            if (registry[i].desc->shutdown)
-                registry[i].desc->shutdown();
-            event_publish(EVENT_PLUGIN_UNLOAD, registry[i].id, 0, name);
-            registry[i].state = PLUGIN_STATE_LOADED;
-            vga_printf("[PLG] Unloaded: %s\n", name);
-            return 0;
-        }
-    }
-    return -1;
-}
-
-void plugin_tick_all(void)
-{
-    for (int i = 0; i < plugin_count; i++) {
-        if (registry[i].state == PLUGIN_STATE_ACTIVE &&
-            registry[i].desc->tick) {
-            registry[i].desc->tick();
         }
     }
 }
 
-const plugin_entry_t *plugin_find(const char *name)
-{
-    for (int i = 0; i < plugin_count; i++) {
-        if (kstrcmp(registry[i].desc->name, name) == 0)
-            return &registry[i];
+plugin_slot_t *plugin_find(const char *name) {
+    for (int i = 0; i < PLUGIN_MAX; i++) {
+        if (plugin_table[i].state != PLUGIN_STATE_UNLOADED &&
+            strncmp_k(plugin_table[i].desc.name, name, PLUGIN_NAME_LEN) == 0) {
+            return &plugin_table[i];
+        }
     }
-    return (void *)0;
+    return NULL;
 }
 
-void plugin_list(void)
-{
-    static const char * const state_names[] = {
-        "UNLOADED", "LOADED", "ACTIVE", "ERROR"
-    };
-    vga_puts("[PLG] Plugin registry:\n");
-    for (int i = 0; i < plugin_count; i++) {
-        vga_printf("  [%u] %-20s state=%-8s type=%d ver=0x%x\n",
-                   registry[i].id,
-                   registry[i].desc->name,
-                   state_names[registry[i].state],
-                   (int)registry[i].desc->type,
-                   registry[i].desc->version);
+void plugin_list(void) {
+    vga_println("--- Plugins ---");
+    for (int i = 0; i < PLUGIN_MAX; i++) {
+        if (plugin_table[i].state == PLUGIN_STATE_UNLOADED) continue;
+        vga_print("  [");
+        vga_print(plugin_table[i].desc.name);
+        vga_print("] v");
+        vga_print(plugin_table[i].desc.version);
+        vga_print("  state=");
+        switch (plugin_table[i].state) {
+            case PLUGIN_STATE_LOADED:  vga_print("LOADED");  break;
+            case PLUGIN_STATE_ACTIVE:  vga_print("ACTIVE");  break;
+            case PLUGIN_STATE_ERROR:   vga_print("ERROR");   break;
+            default:                   vga_print("?");       break;
+        }
+        vga_print("  ticks=");
+        vga_print_dec(plugin_table[i].tick_count);
+        vga_putchar('\n');
     }
+}
+
+int plugin_count(void) {
+    return plugin_count_val;
 }

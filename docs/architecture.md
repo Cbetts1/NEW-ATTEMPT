@@ -1,79 +1,102 @@
-# AI Aura OS — Architecture Overview
-# File: docs/architecture.md
+# AI Aura OS — Architecture Document
 
-## System Design
+## Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        DISK IMAGE (AIOS.img)                │
-│                                                             │
-│  Sector 0     │  Sectors 1–64            │  (unused)       │
-│  Bootloader   │  Kernel binary           │                  │
-│  (512 bytes)  │  (≤ 32 KB)               │                  │
-└─────────────────────────────────────────────────────────────┘
-```
+AI Aura OS is a fully autonomous, self-contained x86 operating system designed to boot directly from hardware (or QEMU) without any dependency on Android, Linux, or Termux at runtime. Termux is used **only** as a build forge.
 
-## Boot Sequence
+---
+
+## Directory Structure
 
 ```
-BIOS
- └─► Bootloader (0x7C00)
-      ├─ Print "AI Aura OS Booting..."
-      ├─ Load kernel sectors from disk → 0x1000:0x0000
-      └─► Kernel Entry (0x10000)
-           ├─ Set up GDT
-           ├─ Switch to 32-bit protected mode
-           └─► kernel_main()
-                ├─ vga_init()
-                ├─ memory_init()
-                ├─ event_bus_init()
-                ├─ plugin_manager_init()
-                ├─ mirror_init()
-                ├─ menu_init()
-                └─► Heartbeat Loop (infinite)
+NEW-ATTEMPT/
+├── bootloader/
+│   ├── boot.asm          # Stage 1 MBR bootloader (NASM, 512 bytes)
+│   └── (boot.bin → build/) # Assembled output
+├── kernel/
+│   ├── kernel.c          # Kernel entry + heartbeat loop
+│   ├── kernel.h          # Core types, status codes, global state
+│   ├── vga.c / vga.h     # VGA text-mode driver (0xB8000)
+│   ├── io.h              # x86 I/O port inline helpers
+│   ├── memory.c / .h     # Free-list heap allocator
+│   ├── eventbus.c / .h   # Publish-subscribe event bus
+│   ├── plugin.c / .h     # Plugin/adapter lifecycle manager
+│   ├── mirror.c / .h     # System mirroring engine
+│   ├── scheduler.c / .h  # Cooperative round-robin scheduler
+│   ├── menu.c / .h       # Main menu interface
+│   └── kernel.ld         # Linker script (base 0x10000)
+├── env/
+│   ├── env.c / env.h     # Key-value environment registry
+│   └── fs.c / fs.h       # In-memory virtual filesystem
+├── modules/
+│   ├── loader.c / .h     # Module loader (static registry)
+│   └── mod_hello.c       # Example module (hello service)
+├── adapters/
+│   ├── adapter.h         # Adapter interface definition
+│   └── adapter_serial.c  # COM1 serial port adapter
+├── build/                # Build artifacts (auto-created by make)
+├── image/
+│   └── AIOS.img          # Final bootable disk image
+├── docs/
+│   ├── architecture.md   # This file
+│   ├── build.md          # Build instructions
+│   └── qemu.md           # QEMU run instructions
+├── Makefile
+└── README.md
 ```
+
+---
 
 ## Subsystem Map
 
 ```
-kernel_main()
-│
-├── VGA Driver          kernel/vga.c
-│    └─ 80×25 text mode, colour, scroll, printf
-│
-├── Memory Manager      kernel/memory.c
-│    └─ Free-list allocator, 4 MB heap, no libc
-│
-├── Event Bus           kernel/event_bus.c
-│    └─ Pub/sub ring buffer, 64-event queue
-│
-├── Plugin Manager      kernel/plugin.c
-│    ├─ aura.core       modules/aura_core.c
-│    ├─ aura.fs         adapters/aura_fs.c
-│    └─ aura.net        adapters/aura_net.c
-│
-├── Mirror Engine       kernel/mirror.c
-│    └─ 8-slot snapshot ring, XOR checksum, auto-capture
-│
-└── Main Menu           kernel/menu.c
-     └─ PS/2 keyboard polling, 5-entry interactive menu
+┌──────────────────────────────────────────────────────────┐
+│                    AI Aura OS Boot                       │
+│  BIOS → MBR (boot.asm) → Protected Mode → kernel_main() │
+└────────────────────────┬─────────────────────────────────┘
+                         │
+         ┌───────────────▼───────────────┐
+         │          kernel.c             │
+         │   kernel_main() bootstrap     │
+         └───┬───┬───┬───┬───┬───┬───┬──┘
+             │   │   │   │   │   │   │
+         ┌───▼─┐ │ ┌─▼─┐ │ ┌─▼─┐ │ ┌▼─────┐
+         │ VGA │ │ │Mem│ │ │Evt│ │ │Sched │
+         │ drv │ │ │Mgr│ │ │Bus│ │ │      │
+         └─────┘ │ └───┘ │ └───┘ │ └──────┘
+                 │       │       │
+              ┌──▼──┐ ┌──▼──┐ ┌──▼──┐
+              │Plugn│ │Mirro│ │ Menu│
+              │ Mgr │ │  r  │ │     │
+              └──┬──┘ └─────┘ └─────┘
+                 │
+        ┌────────┴────────┐
+        │                 │
+   ┌────▼────┐      ┌─────▼─────┐
+   │ Modules │      │ Adapters  │
+   │ (hello) │      │ (serial)  │
+   └─────────┘      └───────────┘
 ```
 
-## Memory Map
+---
 
-| Region          | Address           | Size     |
-|-----------------|-------------------|----------|
-| BIOS / real-mode | 0x00000–0x007FFF  | 32 KB    |
-| Bootloader      | 0x007C00–0x007DFF | 512 B    |
-| Kernel          | 0x010000–0x017FFF | ≤ 32 KB  |
-| Kernel stack    | grows ↓ 0x200000  | ~1 MB    |
-| Kernel heap     | 0x300000–0x6FFFFF | 4 MB     |
-| VGA text buffer | 0x0B8000–0x0BFFFF | 32 KB    |
+## Memory Layout
+
+| Region             | Physical Address | Size    | Use                  |
+|--------------------|-----------------|---------|----------------------|
+| BIOS ROM           | 0x000F0000      | 64 KB   | BIOS                 |
+| VGA Buffer         | 0x000B8000      | 4 KB    | Text display         |
+| Kernel stack       | 0x00090000      | ~32 KB  | Boot-time stack      |
+| Bootloader (MBR)   | 0x00007C00      | 512 B   | Loaded by BIOS       |
+| Kernel image       | 0x00010000      | ≤32 KB  | Loaded by bootloader |
+| Kernel heap        | 0x00200000      | 512 KB  | kmalloc / kfree      |
+
+---
 
 ## Key Design Principles
 
-1. **Zero external dependencies at runtime** — the OS never calls back to the host.
-2. **Event-driven core** — subsystems communicate via the event bus, not direct calls.
-3. **Plugin architecture** — all capabilities are loaded through the plugin manager.
-4. **Self-healing via mirroring** — periodic snapshots allow state restoration.
-5. **Build anywhere** — entire OS compiles with standard toolchain on phone or PC.
+1. **Zero host-OS dependencies at runtime** — the OS image is 100% self-contained.
+2. **Single heartbeat loop** — `scheduler_tick()` drives everything; no busy timers.
+3. **Event-driven subsystems** — subsystems communicate via the event bus, not direct calls.
+4. **Pluggable architecture** — every service is a plugin registered with `plugin_manager`.
+5. **Mirroring** — the system mirror captures and can restore OS state snapshots.
