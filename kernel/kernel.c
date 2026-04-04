@@ -13,6 +13,10 @@
 #include "mirror.h"
 #include "scheduler.h"
 #include "menu.h"
+#include "env.h"
+#include "fs.h"
+#include "loader.h"
+#include "../adapters/adapter.h"
 
 /* -------------------------------------------------------------------------
  * Global kernel state
@@ -72,7 +76,24 @@ void kernel_main(void) {
     scheduler_init();
     vga_println("[OK] Scheduler initialized");
 
-    /* 7. Register built-in kernel tasks */
+    /* 7. Environment registry */
+    env_init();
+    vga_println("[OK] Environment Registry initialized");
+
+    /* 8. Virtual filesystem */
+    fs_init();
+    vga_println("[OK] Virtual Filesystem initialized");
+
+    /* 9. Module loader — registers and activates built-in modules */
+    loader_init();
+    loader_load_all();
+    vga_println("[OK] Module Loader initialized");
+
+    /* 10. Serial adapter (COM1) — enables debug output over serial */
+    adapter_serial_register();
+    vga_println("[OK] Serial Adapter registered");
+
+    /* 11. Register built-in kernel tasks */
     scheduler_add_task("heartbeat",   kernel_heartbeat,  1);
     scheduler_add_task("event_drain", eventbus_process,  1);
     scheduler_add_task("mirror_sync", mirror_sync,      10);
@@ -81,7 +102,7 @@ void kernel_main(void) {
     vga_println("[OK] Built-in tasks registered");
     vga_println("==================================");
 
-    /* 8. Transition to running state and show main menu */
+    /* 12. Transition to running state and show main menu */
     g_kernel_state = KERNEL_STATE_RUN;
     menu_run();
 

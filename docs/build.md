@@ -47,10 +47,11 @@ make
 
 ### What `make` does
 
-1. Assembles `bootloader/boot.asm` → `build/bootloader/boot.bin` (512-byte MBR)
-2. Compiles all C sources from `kernel/`, `env/`, `modules/`, `adapters/`
-3. Links objects using `kernel/kernel.ld` → `build/kernel.elf` → `build/kernel.bin`
-4. Packs: `boot.bin` (sector 1) + `kernel.bin` (sectors 2–N) → `image/AIOS.img`
+1. Assembles `bootloader/boot.asm` → `build/bootloader/boot.bin` (512-byte MBR, flat binary)
+2. Assembles `kernel/entry.asm` → `build/kernel/entry.o` (32-bit ELF object — kernel entry stub)
+3. Compiles all C sources from `kernel/`, `env/`, `modules/`, `adapters/`
+4. Links `entry.o` first (so `_start` lands at 0x10000), then all C objects, using `kernel/link.ld` → `build/kernel.elf` → `build/kernel.bin`
+5. Packs: `boot.bin` (sector 1) + `kernel.bin` (sectors 2–N) → `image/AIOS.img`
 
 ---
 

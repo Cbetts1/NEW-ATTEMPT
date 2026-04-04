@@ -100,3 +100,27 @@ NEW-ATTEMPT/
 3. **Event-driven subsystems** — subsystems communicate via the event bus, not direct calls.
 4. **Pluggable architecture** — every service is a plugin registered with `plugin_manager`.
 5. **Mirroring** — the system mirror captures and can restore OS state snapshots.
+
+---
+
+## Boot Flow
+
+```
+BIOS loads MBR (boot.asm) at 0x7C00 (real mode, 16-bit)
+  │  prints banner, loads kernel sectors into 0x10000 via INT 0x13
+  │  sets up GDT, enters 32-bit protected mode
+  └─ far-jumps to 0x10000 (kernel/entry.asm :: _start)
+
+entry.asm :: _start  [BITS 32, already in protected mode]
+  │  reloads segment registers (0x10), sets ESP = 0x200000
+  └─ calls kernel_main()
+
+kernel_main() (kernel/kernel.c)
+  │  vga_init → memory_init → eventbus_init → plugin_manager_init
+  │  mirror_init → scheduler_init → env_init → fs_init
+  │  loader_init + loader_load_all  (registers mod_hello plugin)
+  │  adapter_serial_register        (COM1 serial adapter)
+  │  scheduler_add_task × 4
+  │  menu_run()   ← displays boot banner + system status
+  └─ while(1) { scheduler_tick(); }  ← perpetual heartbeat loop
+```

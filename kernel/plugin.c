@@ -21,12 +21,6 @@ static int strncmp_k(const char *a, const char *b, int n) {
     return 0;
 }
 
-static void strncpy_k(char *dst, const char *src, int n) {
-    int i = 0;
-    while (i < n - 1 && src[i]) { dst[i] = src[i]; i++; }
-    dst[i] = '\0';
-}
-
 /* -------------------------------------------------------------------------- */
 
 void plugin_manager_init(void) {

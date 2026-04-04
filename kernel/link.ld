@@ -17,7 +17,7 @@ SECTIONS
     .text :
     {
         /* entry.o MUST be first so _start is at exactly 0x10000 */
-        build/entry.o(.text)
+        build/kernel/entry.o(.text)
         *(.text*)
     }
 

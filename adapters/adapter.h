@@ -31,4 +31,7 @@ typedef struct {
 /* Register an adapter as a plugin */
 aura_status_t adapter_register(adapter_t *adp);
 
+/* Register the built-in COM1 serial adapter */
+void adapter_serial_register(void);
+
 #endif /* ADAPTER_H */

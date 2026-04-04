@@ -34,18 +34,19 @@ QEMU    := qemu-system-i386
 # ---------------------------------------------------------------------------
 # Flags
 # ---------------------------------------------------------------------------
-ASFLAGS  := -f bin
+BOOT_ASFLAGS := -f bin
+KERN_ASFLAGS := -f elf32
 
 ifeq ($(CROSS),1)
 CFLAGS   := -std=c99 -ffreestanding -O2 -Wall -Wextra \
             -fno-stack-protector -fno-builtin \
             -I kernel -I env -I modules -I adapters
-LDFLAGS  := -T kernel/kernel.ld -nostdlib
+LDFLAGS  := -T kernel/link.ld -nostdlib --no-warn-rwx-segments
 else
 CFLAGS   := -std=c99 -m32 -ffreestanding -O2 -Wall -Wextra \
             -fno-stack-protector -fno-builtin \
             -I kernel -I env -I modules -I adapters
-LDFLAGS  := -T kernel/kernel.ld -melf_i386 -nostdlib
+LDFLAGS  := -T kernel/link.ld -melf_i386 -nostdlib --no-warn-rwx-segments
 endif
 
 # ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ ALL_C_SRCS := $(KERNEL_SRCS) $(ENV_SRCS) $(MODULE_SRCS) $(ADAPTER_SRCS)
 KERNEL_OBJS := $(patsubst %.c, $(BUILD_DIR)/%.o, $(ALL_C_SRCS))
 
 BOOT_BIN   := $(BUILD_DIR)/bootloader/boot.bin
+ENTRY_OBJ  := $(BUILD_DIR)/kernel/entry.o
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 
 # ---------------------------------------------------------------------------
@@ -113,7 +115,14 @@ directories:
 # ---------------------------------------------------------------------------
 $(BOOT_BIN): bootloader/boot.asm
 	@echo "[AS]  $<"
-	$(AS) $(ASFLAGS) -o $@ $<
+	$(AS) $(BOOT_ASFLAGS) -o $@ $<
+
+# ---------------------------------------------------------------------------
+# Assemble kernel entry stub → ELF object (must be linked first)
+# ---------------------------------------------------------------------------
+$(ENTRY_OBJ): kernel/entry.asm
+	@echo "[AS]  $<"
+	$(AS) $(KERN_ASFLAGS) -o $@ $<
 
 # ---------------------------------------------------------------------------
 # Compile kernel C sources → object files
@@ -135,11 +144,12 @@ $(BUILD_DIR)/adapters/%.o: adapters/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # ---------------------------------------------------------------------------
-# Link kernel objects → ELF → strip to flat binary
+# Link: entry.o first, then all kernel objects → ELF → strip to flat binary
+# link.ld is used (ENTRY(_start), places entry.o at 0x10000)
 # ---------------------------------------------------------------------------
-$(KERNEL_BIN): $(KERNEL_OBJS) kernel/kernel.ld
+$(KERNEL_BIN): $(ENTRY_OBJ) $(KERNEL_OBJS) kernel/link.ld
 	@echo "[LD]  kernel ELF"
-	$(LD) $(LDFLAGS) -o $(BUILD_DIR)/kernel.elf $(KERNEL_OBJS)
+	$(LD) $(LDFLAGS) -o $(BUILD_DIR)/kernel.elf $(ENTRY_OBJ) $(KERNEL_OBJS)
 	@echo "[BIN] stripping to flat binary"
 	$(OBJCOPY) -O binary $(BUILD_DIR)/kernel.elf $@
 

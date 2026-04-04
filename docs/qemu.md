@@ -69,6 +69,10 @@ AI Aura OS — Kernel Initializing
 [OK] Plugin Manager initialized
 [OK] System Mirror initialized
 [OK] Scheduler initialized
+[OK] Environment Registry initialized
+[OK] Virtual Filesystem initialized
+[OK] Module Loader initialized
+[OK] Serial Adapter registered
 [OK] Built-in tasks registered
 ==================================
 ------------------------------------------------------------
@@ -79,14 +83,24 @@ AI Aura OS — Kernel Initializing
 === System Status ===
   Memory Used : 0 bytes
   Memory Free : 524224 bytes
-  Plugins     : 0
+  Plugins     : 1
   Tasks       : 4
   Kernel Tick : 0
+
+> **Note:** The `mod_hello` service plugin is registered automatically by
+> `loader_load_all()` during boot, so the plugin count starts at 1.
 
 === Main Menu ===
   [1] Show system status
   [2] List plugins
-  ...
+  [3] List scheduler tasks
+  [4] Capture system snapshot
+  [5] Dump mirror snapshots
+  [6] Memory stats
+  [H] Heartbeat info
+  [K] Kernel panic (test)
+
+  (System running — kernel heartbeat active)
 
 [Aura] OS ready. Entering autonomous kernel loop...
 ```
