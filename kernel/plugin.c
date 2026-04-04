@@ -14,7 +14,7 @@ static int           plugin_count_val = 0;
 
 static int strncmp_k(const char *a, const char *b, int n) {
     while (n-- > 0) {
-        if (*a != *b) return (unsigned char)*a - (unsigned char)*b;
+        if (*a != *b) return (int)(unsigned char)*a - (int)(unsigned char)*b;
         if (*a == '\0') return 0;
         a++; b++;
     }

@@ -64,5 +64,8 @@ const char *env_get(const char *key) {
 }
 
 void env_dump(void) {
-    /* Called from VGA context — not included here to avoid circular deps */
+    /* Dumping is performed by the caller using the VGA driver to avoid a
+     * circular dependency between the environment layer and the display layer.
+     * Callers should call env_get() for individual keys, or iterate the
+     * env_table[] array directly where the VGA driver is available. */
 }

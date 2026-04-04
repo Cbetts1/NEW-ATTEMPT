@@ -66,6 +66,9 @@ void loader_load_all(void) {
 }
 
 void loader_list(void) {
-    /* Output handled by caller using VGA driver */
+    /* Listing is performed by the caller using the VGA driver to avoid a
+     * circular dependency between the module loader and the display layer.
+     * Iterate module_registry[] directly and call vga_print() from context
+     * where the VGA driver is available. */
     (void)module_registry;
 }

@@ -89,6 +89,9 @@ fs_node_t *fs_find(const char *name) {
 }
 
 void fs_list(void) {
-    /* Caller should use VGA driver to display — listed here for linkage */
+    /* Listing is performed by the caller using the VGA driver to avoid a
+     * circular dependency between the VFS layer and the display layer.
+     * Iterate fs_table[] directly and call vga_print() from context where
+     * the VGA driver is available (e.g. from kernel/menu.c). */
     (void)fs_table;
 }
