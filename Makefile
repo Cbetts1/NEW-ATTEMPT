@@ -89,7 +89,7 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: all clean run run-serial directories info
+.PHONY: all clean run run-serial directories info test test-dirs
 
 all: directories $(IMAGE)
 	@echo ""
@@ -175,6 +175,67 @@ run-serial: all
 clean:
 	@echo "[CLEAN] Removing build artifacts"
 	rm -rf $(BUILD_DIR) $(IMAGE_DIR)
+
+# ---------------------------------------------------------------------------
+# Test suite — host-side unit tests (no cross-compiler, no -m32)
+# ---------------------------------------------------------------------------
+TEST_CC     := gcc
+TEST_CFLAGS := -std=c99 -Wall -Wextra -Wno-unused-parameter \
+               -I . -I kernel -I modules -I adapters \
+               -g
+
+TEST_STUBS  := tests/stubs/vga_stub.c tests/stubs/globals.c
+
+TEST_BINS   := \
+    build/tests/test_memory    \
+    build/tests/test_eventbus  \
+    build/tests/test_scheduler \
+    build/tests/test_plugin    \
+    build/tests/test_mirror
+
+test-dirs:
+	@mkdir -p build/tests
+
+test: test-dirs $(TEST_BINS)
+	@echo ""
+	@echo "  ================================================="
+	@echo "   AI Aura OS — running test suite"
+	@echo "  ================================================="
+	@failed=0; \
+	for t in $(TEST_BINS); do \
+	    if $$t; then \
+	        echo "  PASS  $$t"; \
+	    else \
+	        echo "  FAIL  $$t"; \
+	        failed=1; \
+	    fi; \
+	done; \
+	echo "  ================================================="; \
+	if [ $$failed -eq 0 ]; then \
+	    echo "  All tests passed."; \
+	else \
+	    echo "  Some tests FAILED."; \
+	    exit 1; \
+	fi
+
+build/tests/test_memory: tests/test_memory.c kernel/memory.c $(TEST_STUBS)
+	$(TEST_CC) $(TEST_CFLAGS) -o $@ $^
+
+build/tests/test_eventbus: tests/test_eventbus.c kernel/eventbus.c $(TEST_STUBS)
+	$(TEST_CC) $(TEST_CFLAGS) -o $@ $^
+
+build/tests/test_scheduler: tests/test_scheduler.c kernel/scheduler.c \
+                             kernel/eventbus.c $(TEST_STUBS)
+	$(TEST_CC) $(TEST_CFLAGS) -o $@ $^
+
+build/tests/test_plugin: tests/test_plugin.c kernel/plugin.c \
+                         kernel/eventbus.c $(TEST_STUBS)
+	$(TEST_CC) $(TEST_CFLAGS) -o $@ $^
+
+build/tests/test_mirror: tests/test_mirror.c kernel/mirror.c \
+                         kernel/eventbus.c $(TEST_STUBS) \
+                         tests/stubs/mirror_deps.c
+	$(TEST_CC) $(TEST_CFLAGS) -o $@ $^
 
 # ---------------------------------------------------------------------------
 # Build info
