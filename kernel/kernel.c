@@ -16,6 +16,8 @@
 #include "env.h"
 #include "fs.h"
 #include "loader.h"
+#include "keyboard.h"
+#include "user.h"
 #include "../adapters/adapter.h"
 
 /* -------------------------------------------------------------------------
@@ -93,7 +95,15 @@ void kernel_main(void) {
     adapter_serial_register();
     vga_println("[OK] Serial Adapter registered");
 
-    /* 11. Register built-in kernel tasks */
+    /* 11. Keyboard driver */
+    kb_init();
+    vga_println("[OK] Keyboard Driver initialized");
+
+    /* 12. User registry */
+    user_init();
+    vga_println("[OK] User Registry initialized");
+
+    /* 13. Register built-in kernel tasks */
     scheduler_add_task("heartbeat",   kernel_heartbeat,  1);
     scheduler_add_task("event_drain", eventbus_process,  1);
     scheduler_add_task("mirror_sync", mirror_sync,      10);
@@ -102,17 +112,10 @@ void kernel_main(void) {
     vga_println("[OK] Built-in tasks registered");
     vga_println("==================================");
 
-    /* 12. Transition to running state and show main menu */
+    /* 14. Transition to running state — menu_run() owns the main loop */
     g_kernel_state = KERNEL_STATE_RUN;
     menu_run();
 
-    /* -----------------------------------------------------------------------
-     * Perpetual Kernel Heartbeat Loop
-     * Everything in AI Aura OS is driven from this loop via the scheduler.
-     * ----------------------------------------------------------------------- */
-    while (1) {
-        scheduler_tick();
-    }
-
-    /* Unreachable — OS is autonomous and never exits */
+    /* Unreachable — menu_run() never returns (perpetual desktop loop) */
+    kernel_panic("menu_run() returned unexpectedly.");
 }

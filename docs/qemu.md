@@ -59,6 +59,8 @@ gdb
 
 ## Expected Boot Sequence
 
+### 1. Kernel init (brief green-text phase)
+
 ```
 AI Aura OS Booting...
 Kernel loaded. Entering protected mode...
@@ -73,37 +75,32 @@ AI Aura OS — Kernel Initializing
 [OK] Virtual Filesystem initialized
 [OK] Module Loader initialized
 [OK] Serial Adapter registered
+[OK] Keyboard Driver initialized
+[OK] User Registry initialized
 [OK] Built-in tasks registered
 ==================================
-------------------------------------------------------------
-       AI AURA OS  v1.0.0   --  Aura Kernel
-           Autonomous Intelligence Platform
-------------------------------------------------------------
-
-=== System Status ===
-  Memory Used : 0 bytes
-  Memory Free : 524224 bytes
-  Plugins     : 1
-  Tasks       : 4
-  Kernel Tick : 0
-
-> **Note:** The `mod_hello` service plugin is registered automatically by
-> `loader_load_all()` during boot, so the plugin count starts at 1.
-
-=== Main Menu ===
-  [1] Show system status
-  [2] List plugins
-  [3] List scheduler tasks
-  [4] Capture system snapshot
-  [5] Dump mirror snapshots
-  [6] Memory stats
-  [H] Heartbeat info
-  [K] Kernel panic (test)
-
-  (System running — kernel heartbeat active)
-
-[Aura] OS ready. Entering autonomous kernel loop...
 ```
+
+### 2. Boot splash (~5 seconds animated)
+
+Full-screen blue background with the AI Aura OS ASCII logo and an
+animated progress bar that fills green left-to-right.
+
+### 3. Win95-themed login dialog
+
+Username and password fields (default: admin / admin).
+Type each value and press **Enter** to advance.
+
+### 4. Interactive desktop
+
+Gray 80×25 desktop with a blue header bar at top, a taskbar with
+`[Start]` button at the bottom. Press **S** to open the Start Menu.
+
+### 5. Start Menu (arrow-key navigation)
+
+Nine items accessible with ↑/↓ and Enter:
+System Status, Plugin Manager, Memory Stats, File System,
+Scheduler Tasks, Mirror Snapshots, About, Shut Down.
 
 ---
 

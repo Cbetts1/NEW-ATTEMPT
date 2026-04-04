@@ -3,75 +3,106 @@
 
 ## Prerequisites
 
-Install the required packages in Termux:
+Install the required packages in Termux.
 
+### x86/x86_64 machine
 ```bash
 pkg update && pkg upgrade -y
-pkg install -y nasm gcc binutils qemu-system-x86-64
+pkg install -y nasm gcc-multilib binutils make qemu-system-x86-64
+make
 ```
 
-> **Note:** Termux's `gcc` targets AArch64 (your phone's CPU).  To produce
-> i386 binaries you must use the `USE_SYSTEM_GCC=1` flag, which tells the
-> Makefile to pass `-m32` to gcc.  This requires the 32-bit multilib support
-> that Termux's gcc includes.
+### Android phone (ARM / AArch64) — Termux
+```bash
+pkg update && pkg upgrade -y
+# clang + lld are the cross-compilation toolchain for i386 on ARM
+pkg install -y nasm clang lld llvm binutils make
+make
+```
+
+The Makefile auto-detects AArch64/ARM and switches to the `clang --target=i386-pc-none-elf` path automatically.  No extra flags are needed.
+
+---
 
 ## Build Steps
 
 ```bash
-# 1. Clone or navigate to the repository
+# Navigate to the repository
 cd ~/NEW-ATTEMPT
 
-# 2. Build the OS image
-make USE_SYSTEM_GCC=1
+# Build the OS image (toolchain is auto-detected)
+make
 
 # Output: image/AIOS.img
 ```
 
-## Expected Output
+## Expected Output (Termux ARM)
 
 ```
-[ASM] Assembling bootloader → build/bootloader/boot.bin
-[ASM] Assembling kernel/entry.asm → build/kernel/entry.o
-[CC ] Compiling kernel/kernel.c ...
-[CC ] Compiling kernel/vga.c ...
-[CC ] Compiling kernel/memory.c ...
-[CC ] Compiling kernel/event_bus.c ...
-[CC ] Compiling kernel/plugin.c ...
-[CC ] Compiling kernel/mirror.c ...
-[CC ] Compiling kernel/menu.c ...
-[CC ] Compiling modules/aura_core.c ...
-[CC ] Compiling adapters/aura_fs.c ...
-[CC ] Compiling adapters/aura_net.c ...
-[LD ] Linking kernel → build/kernel.bin
-[IMG] Creating disk image: image/AIOS.img
+[AS]  bootloader/boot.asm
+[AS]  kernel/entry.asm
+[CC]  kernel/kernel.c            (clang --target=i386-pc-none-elf)
+[CC]  kernel/vga.c
+[CC]  kernel/memory.c
+[CC]  kernel/eventbus.c
+[CC]  kernel/plugin.c
+[CC]  kernel/mirror.c
+[CC]  kernel/scheduler.c
+[CC]  kernel/keyboard.c
+[CC]  kernel/user.c
+[CC]  kernel/ui95.c
+[CC]  kernel/menu.c
+[CC]  env/env.c
+[CC]  env/fs.c
+[CC]  modules/loader.c
+[CC]  modules/mod_hello.c
+[CC]  adapters/adapter_serial.c
+[LD]  kernel ELF                 (ld.lld -m elf_i386)
+[BIN] stripping to flat binary   (llvm-objcopy / objcopy -O binary)
+[IMG] Building image/AIOS.img
 
-  ╔══════════════════════════════════════╗
-  ║   AI Aura OS image built: AIOS.img   ║
-  ╚══════════════════════════════════════╝
+  =================================================
+   AI Aura OS build complete: image/AIOS.img
+  =================================================
 ```
+
+## Toolchain Matrix
+
+| Host platform      | CC                                 | LD               | OBJCOPY          |
+|--------------------|------------------------------------|------------------|------------------|
+| i686-elf-gcc present (any host) | `i686-elf-gcc`       | `i686-elf-ld`    | `i686-elf-objcopy` |
+| AArch64 / ARM (Termux)          | `clang --target=i386-pc-none-elf` | `ld.lld -m elf_i386` | `llvm-objcopy` |
+| x86 / x86_64 Linux / macOS      | `gcc -m32`            | `ld -melf_i386`  | `objcopy`        |
+
+Run `make info` to see which toolchain was detected.
 
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
 | `nasm: command not found` | `pkg install nasm` |
-| `gcc: error: unrecognized -m32` | Try `pkg install clang` and `USE_SYSTEM_GCC=1 CC=clang` |
-| `ld: cannot find -lgcc` | Pass `-fno-stack-protector` (already in Makefile) |
-| Linker script path error | Ensure you run `make` from repo root |
+| `clang: command not found` | `pkg install clang` |
+| `ld.lld: command not found` | `pkg install lld` |
+| `llvm-objcopy not found` | `pkg install llvm` (or ignore — plain `objcopy` also works) |
+| `error: ARM host ... clang not found` | Install clang: `pkg install clang lld` |
+| linker script error | Run `make` from the repo root directory |
 
 ## Clean Build
 
 ```bash
 make clean
-make USE_SYSTEM_GCC=1
-```
-
-## Using a Cross-Compiler (PC / preferred)
-
-```bash
-# Install i686-elf toolchain (Debian/Ubuntu example)
-sudo apt install nasm gcc-multilib binutils qemu-system-x86
-
-# Build (no special flag needed if i686-elf-gcc is in PATH)
 make
 ```
+
+## Running in QEMU (Termux)
+
+```bash
+pkg install qemu-system-x86-64
+
+# Headless (serial console — Termux-friendly, no display needed)
+make run-serial
+
+# With QEMU display (requires VNC or X11)
+make run
+```
+

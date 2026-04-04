@@ -2,34 +2,70 @@
 # AI Aura OS — Master Makefile
 # Builds the complete OS: bootloader + kernel → AIOS.img
 #
-# Toolchain: nasm + i686-elf-gcc (cross-compiler)  or  nasm + gcc -m32
-# Termux install: pkg install nasm gcc binutils
+# Toolchain (auto-detected):
+#   1. i686-elf-gcc     — preferred cross-compiler (any host)
+#   2. clang + ld.lld   — ARM/Termux (phone), auto-detected by arch
+#   3. gcc -m32         — x86/x86_64 Linux/macOS host fallback
+#
+# Termux install:
+#   pkg install nasm clang lld llvm binutils
+#   make
 #
 # Usage:
 #   make            - Build AIOS.img
 #   make clean      - Remove build artifacts
 #   make run        - Boot with QEMU
 #   make run-serial - Boot with QEMU + serial output to stdout
+#   make info       - Show detected toolchain
 # =============================================================================
 
+HOST_ARCH := $(shell uname -m)
+
 # ---------------------------------------------------------------------------
-# Toolchain detection
-# Prefer i686-elf cross-compiler; fall back to host gcc -m32
+# Toolchain detection (priority order)
 # ---------------------------------------------------------------------------
+
+# 1. Prefer i686-elf cross-compiler when present on any host
 ifneq ($(shell which i686-elf-gcc 2>/dev/null),)
-    CC      := i686-elf-gcc
-    LD      := i686-elf-ld
-    OBJCOPY := i686-elf-objcopy
-    CROSS   := 1
+    CC        := i686-elf-gcc
+    LD        := i686-elf-ld
+    OBJCOPY   := i686-elf-objcopy
+    ARCHFLAGS :=
+    LDARCH    :=
+    TOOLCHAIN := i686-elf-cross
+
+# 2. ARM / Termux (aarch64 or arm): use clang with i386 target + ld.lld
+else ifneq ($(or $(findstring aarch64,$(HOST_ARCH)),$(findstring arm,$(HOST_ARCH))),)
+    ifeq ($(shell which clang 2>/dev/null),)
+        $(error ARM host detected but clang not found. Run: pkg install clang lld llvm nasm)
+    endif
+    ifeq ($(shell which ld.lld 2>/dev/null),)
+        $(error ARM host detected but ld.lld not found. Run: pkg install lld)
+    endif
+    CC        := clang
+    LD        := ld.lld
+    # llvm-objcopy preferred; GNU objcopy works too (cross-format strip)
+    ifneq ($(shell which llvm-objcopy 2>/dev/null),)
+        OBJCOPY := llvm-objcopy
+    else
+        OBJCOPY := objcopy
+    endif
+    ARCHFLAGS := --target=i386-pc-none-elf
+    LDARCH    := -m elf_i386
+    TOOLCHAIN := clang-arm-i386
+
+# 3. x86 / x86_64 host — native gcc -m32
 else
-    CC      := gcc
-    LD      := ld
-    OBJCOPY := objcopy
-    CROSS   := 0
+    CC        := gcc
+    LD        := ld
+    OBJCOPY   := objcopy
+    ARCHFLAGS := -m32
+    LDARCH    := -melf_i386
+    TOOLCHAIN := gcc-m32
 endif
 
-AS      := nasm
-QEMU    := qemu-system-i386
+AS   := nasm
+QEMU := qemu-system-i386
 
 # ---------------------------------------------------------------------------
 # Flags
@@ -37,17 +73,11 @@ QEMU    := qemu-system-i386
 BOOT_ASFLAGS := -f bin
 KERN_ASFLAGS := -f elf32
 
-ifeq ($(CROSS),1)
-CFLAGS   := -std=c99 -ffreestanding -O2 -Wall -Wextra \
-            -fno-stack-protector -fno-builtin \
-            -I kernel -I env -I modules -I adapters
-LDFLAGS  := -T kernel/link.ld -nostdlib --no-warn-rwx-segments
-else
-CFLAGS   := -std=c99 -m32 -ffreestanding -O2 -Wall -Wextra \
-            -fno-stack-protector -fno-builtin \
-            -I kernel -I env -I modules -I adapters
-LDFLAGS  := -T kernel/link.ld -melf_i386 -nostdlib --no-warn-rwx-segments
-endif
+CFLAGS  := -std=c99 $(ARCHFLAGS) -ffreestanding -O2 -Wall -Wextra \
+           -fno-stack-protector -fno-builtin \
+           -I kernel -I env -I modules -I adapters
+
+LDFLAGS := -T kernel/link.ld $(LDARCH) -nostdlib --no-warn-rwx-segments
 
 # ---------------------------------------------------------------------------
 # Directories
@@ -67,6 +97,9 @@ KERNEL_SRCS := \
     kernel/plugin.c    \
     kernel/mirror.c    \
     kernel/scheduler.c \
+    kernel/keyboard.c  \
+    kernel/user.c      \
+    kernel/ui95.c      \
     kernel/menu.c
 
 ENV_SRCS := \
@@ -145,7 +178,6 @@ $(BUILD_DIR)/adapters/%.o: adapters/%.c
 
 # ---------------------------------------------------------------------------
 # Link: entry.o first, then all kernel objects → ELF → strip to flat binary
-# link.ld is used (ENTRY(_start), places entry.o at 0x10000)
 # ---------------------------------------------------------------------------
 $(KERNEL_BIN): $(ENTRY_OBJ) $(KERNEL_OBJS) kernel/link.ld
 	@echo "[LD]  kernel ELF"
@@ -154,18 +186,12 @@ $(KERNEL_BIN): $(ENTRY_OBJ) $(KERNEL_OBJS) kernel/link.ld
 	$(OBJCOPY) -O binary $(BUILD_DIR)/kernel.elf $@
 
 # ---------------------------------------------------------------------------
-# Pack bootloader + kernel binary into a disk image
-# Bootloader  = sector 1 (512 bytes)
-# Kernel      = sectors 2..N (padded to 512-byte boundary)
-# Total image = 1.44 MB floppy image
+# Pack bootloader + kernel binary into a 1.44 MB floppy image
 # ---------------------------------------------------------------------------
 $(IMAGE): $(BOOT_BIN) $(KERNEL_BIN)
 	@echo "[IMG] Building $(IMAGE)"
-	@# Create a blank 1.44 MB floppy image
 	dd if=/dev/zero of=$@ bs=512 count=2880 status=none
-	@# Write bootloader to sector 1
 	dd if=$(BOOT_BIN) of=$@ bs=512 count=1 conv=notrunc status=none
-	@# Write kernel starting at sector 2 (offset 512 bytes)
 	dd if=$(KERNEL_BIN) of=$@ bs=512 seek=1 conv=notrunc status=none
 	@echo "[IMG] Image size: $$(wc -c < $@) bytes"
 
@@ -190,8 +216,11 @@ clean:
 # Build info
 # ---------------------------------------------------------------------------
 info:
+	@echo "Toolchain: $(TOOLCHAIN)"
 	@echo "Compiler : $(CC)"
 	@echo "Assembler: $(AS)"
 	@echo "Linker   : $(LD)"
+	@echo "Objcopy  : $(OBJCOPY)"
+	@echo "Host arch: $(HOST_ARCH)"
 	@echo "Image    : $(IMAGE)"
 	@echo "C sources: $(ALL_C_SRCS)"

@@ -3,8 +3,10 @@
 
 /* =============================================================================
  * AI Aura OS — Main Menu Interface
- * Text-based interactive OS menu rendered via the VGA driver.
+ * Windows 95–themed interactive text UI rendered via the VGA driver.
  * =============================================================================*/
+
+#include "user.h"
 
 void menu_run(void);
 void menu_draw_banner(void);
