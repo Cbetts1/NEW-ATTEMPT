@@ -23,6 +23,15 @@ void        env_init(void);
 int         env_set(const char *key, const char *value);
 const char *env_get(const char *key);
 void        env_dump(void);
+void        env_dump_vga(void);     /* Print all env vars to VGA */
+
+/* Persist all env vars to the FAT12 volume as "AIOS.ENV".
+ * Returns 0 on success, -1 on error. */
+int         env_save(void);
+
+/* Load env vars from "AIOS.ENV" on the FAT12 volume, overlaying current values.
+ * Returns 0 on success, -1 if the file does not exist or is unreadable. */
+int         env_load(void);
 
 /* Well-known environment keys */
 #define ENV_KEY_OS_NAME     "OS_NAME"

@@ -64,3 +64,16 @@ void loader_list(void) {
      * where the VGA driver is available. */
     (void)module_registry;
 }
+
+void loader_list_vga(void) {
+    extern void vga_print(const char *);
+    extern void vga_println(const char *);
+
+    vga_println("--- Modules ---");
+    for (int i = 0; module_registry[i].name; i++) {
+        vga_print("  [");
+        vga_print(module_registry[i].loaded ? "LOADED" : "      ");
+        vga_print("]  ");
+        vga_println(module_registry[i].name);
+    }
+}

@@ -14,10 +14,15 @@
 #include "scheduler.h"
 #include "menu.h"
 #include "keyboard.h"
+#include "idt.h"
+#include "pit.h"
+#include "paging.h"
 #include "../env/env.h"
 #include "../env/fs.h"
+#include "../env/fat12.h"
 #include "../modules/loader.h"
 #include "../adapters/adapter.h"
+#include "../adapters/ata.h"
 
 /* -------------------------------------------------------------------------
  * Global kernel state
@@ -37,12 +42,31 @@ void kernel_heartbeat(void) {
  * -------------------------------------------------------------------------*/
 void kernel_panic(const char *msg) {
     g_kernel_state = KERNEL_STATE_PANIC;
+    /* Attempt to persist env before halting */
+    env_save();
     vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_RED);
     vga_println("\n*** KERNEL PANIC ***");
     if (msg) vga_println(msg);
     vga_println("System halted.");
     __asm__ volatile ("cli; hlt");
     while (1) {} /* Should never reach here */
+}
+
+/* -------------------------------------------------------------------------
+ * Clean shutdown — persist state and halt
+ * -------------------------------------------------------------------------*/
+void kernel_shutdown(void) {
+    g_kernel_state = KERNEL_STATE_PANIC; /* Re-use PANIC state to stop scheduler */
+    vga_set_color(VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+    vga_println("\n[Shutdown] Saving environment...");
+    if (env_save() == 0) {
+        vga_println("[Shutdown] Environment saved to AIOS.ENV.");
+    } else {
+        vga_println("[Shutdown] Save skipped (no disk or FAT12 error).");
+    }
+    vga_println("[Shutdown] AI Aura OS halted. Safe to power off.");
+    __asm__ volatile ("cli; hlt");
+    while (1) {}
 }
 
 /* -------------------------------------------------------------------------
@@ -61,7 +85,10 @@ void kernel_main(void) {
     memory_init();
     vga_println("[OK] Memory Manager initialized");
 
-    /* 3. Event bus */
+    /* 3. Enable paging: identity-map first 4 MB with heap guard pages */
+    paging_init();
+
+    /* 4. Event bus */
     eventbus_init();
     vga_println("[OK] Event Bus initialized");
 
@@ -83,11 +110,21 @@ void kernel_main(void) {
     fs_init();
     vga_println("[OK] Virtual filesystem initialized");
 
-    /* 8. Keyboard driver */
+    /* 8. IDT + PIC remapping — must be done before enabling any IRQ drivers */
+    idt_init();
+    vga_println("[OK] IDT + PIC initialized");
+
+    /* 9. PIT timer at PIT_FREQUENCY_HZ (~100 Hz) — drives g_tick_count via IRQ0 */
+    pit_init();
+    vga_println("[OK] PIT timer initialized");
+
+    /* 10. Keyboard driver — registers IRQ1 handler after IDT is ready */
     keyboard_init();
     vga_println("[OK] Keyboard driver initialized");
 
-    /* 9. Register built-in kernel tasks */
+    /* 11. Register built-in kernel tasks.
+     * keyboard_poll is still registered as a fallback polling task in case
+     * the IRQ1 handler misses a scancode (e.g. early boot before IDT ready). */
     scheduler_add_task("heartbeat",    kernel_heartbeat,  1);
     scheduler_add_task("event_drain",  eventbus_process,  1);
     scheduler_add_task("mirror_sync",  mirror_sync,      10);
@@ -98,19 +135,35 @@ void kernel_main(void) {
 
     vga_println("[OK] Built-in tasks registered");
 
-    /* 10. Load built-in modules (hello, aura_core) */
+    /* 12. Load built-in modules (hello, aura_core) */
     loader_init();
     loader_load_all();
     vga_println("[OK] Modules loaded");
 
-    /* 11. Register hardware adapters */
+    /* 13. Register hardware adapters */
     adapter_serial_register();
     adapter_net_register();
     vga_println("[OK] Adapters registered");
 
+    /* 14. ATA disk driver + FAT12 filesystem */
+    if (ata_init() == AURA_OK) {
+        vga_println("[OK] ATA primary master detected");
+        if (fat12_init() == AURA_OK) {
+            vga_println("[OK] FAT12 volume mounted");
+            /* Overlay env from persisted AIOS.ENV if it exists */
+            if (env_load() == 0) {
+                vga_println("[OK] Environment loaded from AIOS.ENV");
+            }
+        } else {
+            vga_println("[  ] FAT12 mount skipped (no FAT12 volume)");
+        }
+    } else {
+        vga_println("[  ] ATA drive not present — disk I/O disabled");
+    }
+
     vga_println("==================================");
 
-    /* 8. Transition to running state and show main menu */
+    /* 14. Transition to running state and show main menu */
     g_kernel_state = KERNEL_STATE_RUN;
     menu_run();
 

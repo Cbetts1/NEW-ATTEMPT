@@ -35,5 +35,6 @@ int         fs_read(const char *name, uint8_t *buf, uint32_t len);
 int         fs_delete(const char *name);
 fs_node_t  *fs_find(const char *name);
 void        fs_list(void);
+void        fs_list_vga(void);      /* Print all VFS entries to VGA */
 
 #endif /* FS_H */

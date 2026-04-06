@@ -11,6 +11,9 @@
 #include "memory.h"
 #include "kernel.h"
 #include "keyboard.h"
+#include "../env/env.h"
+#include "../env/fs.h"
+#include "../modules/loader.h"
 
 /* Separator line */
 static void draw_line(void) {
@@ -52,8 +55,13 @@ static void menu_show_options(void) {
     vga_println("  [4] Capture system snapshot");
     vga_println("  [5] Dump mirror snapshots");
     vga_println("  [6] Memory stats");
+    vga_println("  [7] List environment variables");
+    vga_println("  [8] List VFS files");
+    vga_println("  [9] List loaded modules");
     vga_println("  [H] Heartbeat info");
     vga_println("  [R] Restore from boot snapshot");
+    vga_println("  [S] Full system dump (env + VFS + modules)");
+    vga_println("  [Q] Clean shutdown (saves env to disk)");
     vga_println("  [K] Kernel panic (test)");
     vga_set_color(VGA_COLOR_DARK_GREY, VGA_COLOR_BLACK);
     vga_println("  Press a key to interact...");
@@ -113,6 +121,15 @@ void menu_tick(void) {
             vga_print("  Heap free : "); vga_print_dec(free_b); vga_println(" bytes");
             break;
         }
+        case '7':
+            env_dump_vga();
+            break;
+        case '8':
+            fs_list_vga();
+            break;
+        case '9':
+            loader_list_vga();
+            break;
         case 'h':
         case 'H':
             vga_print("  Kernel tick : "); vga_print_dec(g_tick_count); vga_putchar('\n');
@@ -124,10 +141,23 @@ void menu_tick(void) {
             vga_println("[Menu] Restoring from boot snapshot (slot 1)...");
             mirror_restore(1);
             break;
+        case 's':
+        case 'S':
+            vga_set_color(VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+            vga_println("\n=== Full System Dump ===");
+            vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
+            env_dump_vga();
+            fs_list_vga();
+            loader_list_vga();
+            break;
         case 'k':
         case 'K':
             kernel_panic("User-triggered test panic from main menu.");
-            break;
+            /* kernel_panic() halts the CPU and never returns */
+        case 'q':
+        case 'Q':
+            kernel_shutdown();
+            /* kernel_shutdown() halts the CPU and never returns */
         default:
             /* Reprint the menu on any unrecognised key */
             menu_show_options();

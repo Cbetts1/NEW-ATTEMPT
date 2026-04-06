@@ -68,11 +68,15 @@ KERNEL_SRCS := \
     kernel/scheduler.c \
     kernel/menu.c      \
     kernel/kstring.c   \
-    kernel/keyboard.c
+    kernel/keyboard.c  \
+    kernel/idt.c       \
+    kernel/pit.c       \
+    kernel/paging.c
 
 ENV_SRCS := \
-    env/env.c  \
-    env/fs.c
+    env/env.c   \
+    env/fs.c    \
+    env/fat12.c
 
 MODULE_SRCS := \
     modules/loader.c   \
@@ -81,7 +85,8 @@ MODULE_SRCS := \
 
 ADAPTER_SRCS := \
     adapters/adapter_serial.c \
-    adapters/aura_net.c
+    adapters/aura_net.c       \
+    adapters/ata.c
 
 ALL_C_SRCS := $(KERNEL_SRCS) $(ENV_SRCS) $(MODULE_SRCS) $(ADAPTER_SRCS)
 
