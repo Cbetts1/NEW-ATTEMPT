@@ -9,6 +9,7 @@
 #include "../kernel/io.h"
 #include "../kernel/vga.h"
 #include "../kernel/kstring.h"
+#include "../kernel/keyboard.h"
 
 #define COM1_PORT       0x3F8
 #define COM1_DATA       (COM1_PORT + 0)
@@ -112,10 +113,18 @@ static aura_status_t serial_plugin_shutdown(void) {
     return AURA_OK;
 }
 
-/* Serial poll: drain incoming COM1 bytes (currently discarded; extend as needed) */
+/* Serial poll: drain incoming COM1 bytes and inject them into the keyboard
+ * ring buffer so the OS can be controlled from a serial console (e.g. via
+ * `make run-serial` on QEMU or a real COM1 terminal). */
 void serial_poll(void) {
     uint8_t buf[16];
-    serial_read(buf, sizeof(buf));
+    int n = serial_read(buf, sizeof(buf));
+    for (int i = 0; i < n; i++) {
+        char c = (char)buf[i];
+        /* Normalise carriage-return to newline for compatibility */
+        if (c == '\r') c = '\n';
+        keyboard_push(c);
+    }
 }
 
 aura_status_t adapter_register(adapter_t *adp) {

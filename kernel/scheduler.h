@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include "kernel.h"
 
-#define SCHED_MAX_TASKS   8
+#define SCHED_MAX_TASKS   16
 #define SCHED_STACK_SIZE  4096
 #define TASK_NAME_LEN     16
 

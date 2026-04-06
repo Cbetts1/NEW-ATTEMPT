@@ -11,5 +11,6 @@
 void keyboard_init(void);
 void keyboard_poll(void);          /* Call from scheduler to buffer keypresses */
 char keyboard_getchar(void);       /* Returns next buffered char, or 0 if none */
+void keyboard_push(char c);        /* Inject a character into the ring buffer   */
 
 #endif /* KEYBOARD_H */

@@ -38,7 +38,8 @@ typedef enum {
 /* Forward declarations */
 void kernel_main(void);
 void kernel_heartbeat(void);
-void kernel_panic(const char *msg);
+__attribute__((noreturn)) void kernel_panic(const char *msg);
+__attribute__((noreturn)) void kernel_shutdown(void);
 
 /* Global kernel state (defined in kernel.c) */
 extern volatile kernel_state_t g_kernel_state;

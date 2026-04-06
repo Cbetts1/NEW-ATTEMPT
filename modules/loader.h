@@ -23,5 +23,6 @@ int  loader_load(const char *name);
 int  loader_unload(const char *name);
 void loader_load_all(void);
 void loader_list(void);
+void loader_list_vga(void);         /* Print all modules to VGA */
 
 #endif /* LOADER_H */

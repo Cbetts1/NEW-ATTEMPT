@@ -4,97 +4,166 @@
 ## Overview
 
 All kernel capabilities are delivered through plugins.  A plugin is any C
-translation unit that exports a `plugin_descriptor_t` struct and is registered
-via `plugin_register()` during kernel startup.
+translation unit that fills in a `plugin_desc_t` struct and registers it via
+`plugin_register()` during kernel startup, then activates it with
+`plugin_activate()`.
 
-## `plugin_descriptor_t` Fields
+## `plugin_desc_t` Fields
 
 ```c
-typedef struct plugin_descriptor {
-    char           name[32];   // unique dot-separated name, e.g. "aura.mymod"
-    uint32_t       version;    // BCD version: 0x0100 = v1.0
-    plugin_type_t  type;       // MODULE, ADAPTER, or DRIVER
-    int  (*init)(void);        // called once on plugin_load(); 0 = success
-    int  (*tick)(void);        // called every heartbeat cycle; 0 = continue
-    void (*shutdown)(void);    // called on plugin_unload()
-} plugin_descriptor_t;
+/* kernel/plugin.h */
+typedef struct {
+    char           name[PLUGIN_NAME_LEN];       /* unique name, e.g. "my.mod" (max 24 chars) */
+    char           version[PLUGIN_VERSION_LEN]; /* version string, e.g. "1.0"  (max 8 chars) */
+    plugin_type_t  type;                        /* CORE, DRIVER, SERVICE, or ADAPTER          */
+    aura_status_t  (*init)(void);               /* called once on activate; AURA_OK = success */
+    aura_status_t  (*tick)(void);               /* called every N scheduler ticks             */
+    aura_status_t  (*shutdown)(void);           /* called on deactivate/unregister            */
+    void          *priv;                        /* optional plugin-private data pointer       */
+} plugin_desc_t;
 ```
+
+`aura_status_t` return values (defined in `kernel/kernel.h`):
+
+| Value          | Meaning                          |
+|----------------|----------------------------------|
+| `AURA_OK`      | Success                          |
+| `AURA_ERR`     | Generic error                    |
+| `AURA_NOMEM`   | Out of memory                    |
+| `AURA_NOSLOT`  | Registry / table is full         |
+| `AURA_NOTFOUND`| Name not found                   |
+| `AURA_BUSY`    | Resource busy (e.g. queue full)  |
+
+## Plugin Types
+
+| Type                   | Purpose                                             |
+|------------------------|-----------------------------------------------------|
+| `PLUGIN_TYPE_CORE`     | Essential OS subsystems (schedulers, managers)      |
+| `PLUGIN_TYPE_DRIVER`   | Low-level hardware abstraction                      |
+| `PLUGIN_TYPE_SERVICE`  | Background OS services (e.g. mod_hello)             |
+| `PLUGIN_TYPE_ADAPTER`  | Hardware/virtual device adapters (serial, net, ATA) |
 
 ## Lifecycle
 
 ```
-plugin_register(desc)
-        │
+plugin_register(&desc)
+        │  slot allocated, state → PLUGIN_STATE_LOADED
+        ▼
+plugin_activate("name")
+        │  calls desc.init(); if AURA_OK → state → PLUGIN_STATE_ACTIVE
+        ▼
+  PLUGIN_STATE_ACTIVE  ──┐
+        │                 │  desc.tick() called by plugin_tick_all()
+        │                 │  (scheduler task "plugin_tick", period 5)
+        │  plugin_deactivate("name")
+        │  calls desc.shutdown() → state → PLUGIN_STATE_LOADED
         ▼
   PLUGIN_STATE_LOADED
         │
-   plugin_load(name)
-        │  calls init()
+  plugin_unregister("name")
+        │  if ACTIVE, calls desc.shutdown() first
         ▼
-  PLUGIN_STATE_ACTIVE  ──┐
-        │                 │  tick() called every heartbeat
-        │  plugin_unload  │
-        ▼                 │
-  PLUGIN_STATE_LOADED  ◄──┘
+  PLUGIN_STATE_UNLOADED  (slot freed)
 ```
+
+On `init()` or `tick()` error the state transitions to `PLUGIN_STATE_ERROR`
+and an error counter is incremented.  The manager continues ticking all other
+active plugins.
 
 ## Minimal Plugin Example
 
 ```c
-// modules/my_module.c
-#include "../kernel/include/plugin.h"
-#include "../kernel/include/vga.h"
+/* modules/my_module.c */
+#include "../kernel/plugin.h"
+#include "../kernel/vga.h"
 
-static int my_init(void)     { vga_puts("[MY] init\n"); return 0; }
-static int my_tick(void)     { return 0; }
-static void my_shutdown(void){ vga_puts("[MY] shutdown\n"); }
+static aura_status_t my_init(void) {
+    vga_println("[MY] init");
+    return AURA_OK;
+}
 
-plugin_descriptor_t my_module_plugin = {
-    .name     = "my.module",
-    .version  = 0x0100,
-    .type     = PLUGIN_TYPE_MODULE,
-    .init     = my_init,
-    .tick     = my_tick,
-    .shutdown = my_shutdown,
+static aura_status_t my_tick(void) {
+    return AURA_OK;
+}
+
+static aura_status_t my_shutdown(void) {
+    vga_println("[MY] shutdown");
+    return AURA_OK;
+}
+
+int mod_my_load(void) {
+    plugin_desc_t desc = {
+        .name     = "my.module",
+        .version  = "1.0",
+        .type     = PLUGIN_TYPE_SERVICE,
+        .init     = my_init,
+        .tick     = my_tick,
+        .shutdown = my_shutdown,
+        .priv     = NULL,
+    };
+    aura_status_t r = plugin_register(&desc);
+    if (r == AURA_OK) plugin_activate("my.module");
+    return (r == AURA_OK) ? 0 : -1;
+}
+```
+
+Register the module in `modules/loader.c`:
+
+```c
+extern int mod_my_load(void);
+
+static module_entry_t module_registry[] = {
+    { "hello",     mod_hello_load,     0 },
+    { "aura_core", mod_aura_core_load, 0 },
+    { "my.module", mod_my_load,        0 },  /* ← add here */
+    { NULL, NULL, 0 },
 };
 ```
 
-Then in `kernel/kernel.c`:
-
-```c
-extern plugin_descriptor_t my_module_plugin;
-// ...
-plugin_register(&my_module_plugin);
-plugin_load("my.module");
-```
-
-And in `Makefile` KERNEL_C_SRCS:
+Add the source to `Makefile` `MODULE_SRCS`:
 
 ```makefile
-KERNEL_C_SRCS += modules/my_module.c
+MODULE_SRCS := \
+    modules/loader.c    \
+    modules/mod_hello.c \
+    modules/aura_core.c \
+    modules/my_module.c
 ```
 
 ## Event Bus Integration
 
-Plugins can publish and subscribe to events:
+Plugins can publish and subscribe to events using `kernel/eventbus.h`:
 
 ```c
-#include "../kernel/include/event_bus.h"
+#include "../kernel/eventbus.h"
 
-static void on_heartbeat(const event_t *ev) {
-    // respond to heartbeat
+static void on_kernel_tick(const aura_event_t *ev) {
+    /* ev->data   = tick count published by aura_core every 1000 ticks */
+    /* ev->topic  = TOPIC_KERNEL_TICK                                   */
+    /* ev->timestamp = g_tick_count at publish time                     */
 }
 
-static int my_init(void) {
-    event_subscribe(EVENT_HEARTBEAT, on_heartbeat);
-    return 0;
+static aura_status_t my_init(void) {
+    eventbus_subscribe(TOPIC_KERNEL_TICK, on_kernel_tick);
+    return AURA_OK;
+}
+
+static aura_status_t my_shutdown(void) {
+    eventbus_unsubscribe(TOPIC_KERNEL_TICK, on_kernel_tick);
+    return AURA_OK;
 }
 ```
 
-## Plugin Types
+Well-known topic IDs (defined in `kernel/eventbus.h`):
 
-| Type                  | Purpose                                           |
-|-----------------------|---------------------------------------------------|
-| `PLUGIN_TYPE_MODULE`  | Core OS functionality (schedulers, managers)      |
-| `PLUGIN_TYPE_ADAPTER` | Virtualised external interfaces (FS, net, device) |
-| `PLUGIN_TYPE_DRIVER`  | Low-level hardware abstraction                    |
+| Topic ID                    | Published by          | `data` value              |
+|-----------------------------|-----------------------|---------------------------|
+| `TOPIC_KERNEL_TICK`         | `aura_core` (×1000)   | core tick counter         |
+| `TOPIC_PLUGIN_LOADED`       | plugin manager        | slot index                |
+| `TOPIC_PLUGIN_UNLOADED`     | plugin manager        | 0                         |
+| `TOPIC_MIRROR_SYNC`         | mirror engine (×256)  | sync counter              |
+| `TOPIC_SCHEDULER_SWITCH`    | scheduler             | scheduler tick            |
+| `TOPIC_ADAPTER_CONNECTED`   | adapter layer         | adapter ID                |
+| `TOPIC_ADAPTER_DISCONNECTED`| adapter layer         | adapter ID                |
+| `TOPIC_USER_INPUT`          | keyboard / serial     | ASCII char (low byte)     |
+| `TOPIC_PANIC`               | kernel_panic()        | 0                         |

@@ -7,6 +7,7 @@
 
 #include "keyboard.h"
 #include "io.h"
+#include "idt.h"
 
 #define KBD_DATA_PORT   0x60    /* read scancode / write command */
 #define KBD_STATUS_PORT 0x64    /* status register (bit 0 = output buffer full) */
@@ -66,6 +67,11 @@ void keyboard_init(void) {
     shift_held  = 0;
     caps_active = 0;
     kb_head = kb_tail = kb_count = 0;
+
+    /* Register this driver as the IRQ1 (keyboard) handler so that
+     * keystrokes are processed via interrupt rather than polling. */
+    irq_register_handler(IRQ_KEYBOARD, keyboard_poll);
+    irq_unmask(IRQ_KEYBOARD);
 }
 
 void keyboard_poll(void) {
@@ -96,4 +102,8 @@ char keyboard_getchar(void) {
     kb_tail = (uint8_t)((kb_tail + 1) % KB_BUFFER_SIZE);
     kb_count--;
     return c;
+}
+
+void keyboard_push(char c) {
+    kb_push(c);
 }

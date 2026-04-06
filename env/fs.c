@@ -76,3 +76,26 @@ void fs_list(void) {
      * the VGA driver is available (e.g. from kernel/menu.c). */
     (void)fs_table;
 }
+
+void fs_list_vga(void) {
+    extern void vga_print(const char *);
+    extern void vga_println(const char *);
+    extern void vga_print_dec(uint32_t);
+
+    vga_println("--- Virtual Filesystem ---");
+    int shown = 0;
+    for (int i = 0; i < FS_MAX_FILES; i++) {
+        if (!fs_table[i].valid) continue;
+        vga_print("  ");
+        vga_print(fs_table[i].type == FS_TYPE_DIR ? "[DIR]  " : "[FILE] ");
+        vga_print(fs_table[i].name);
+        if (fs_table[i].type == FS_TYPE_FILE) {
+            vga_print("  (");
+            vga_print_dec(fs_table[i].size);
+            vga_print(" bytes)");
+        }
+        vga_println("");
+        shown++;
+    }
+    if (!shown) vga_println("  (empty)");
+}
